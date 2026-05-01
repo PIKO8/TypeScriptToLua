@@ -16,6 +16,7 @@ import { getOptionalContinuationData, transformOptionalChain } from "./optional-
 import { transformImportExpression } from "./modules/import";
 import { transformLanguageExtensionCallExpression } from "./language-extensions/call-extension";
 import { getCustomNameFromSymbol } from "./identifier";
+import {embedInlineResult, prepareInlineBody} from "../utils/inline";
 
 export function validateArguments(
     context: TransformationContext,
@@ -213,6 +214,12 @@ function transformElementCall(context: TransformationContext, node: ts.CallExpre
 export const transformCallExpression: FunctionVisitor<ts.CallExpression> = (node, context) => {
     const calledExpression = getCalledExpression(node);
 
+    // Check for inline function calls first
+    const inlineResult = tryTransformInlineCall(context, node);
+    if (inlineResult) {
+        return inlineResult;
+    }
+
     if (calledExpression.kind === ts.SyntaxKind.ImportKeyword) {
         return transformImportExpression(node, context);
     }
@@ -291,3 +298,93 @@ export const transformCallExpression: FunctionVisitor<ts.CallExpression> = (node
 export function getCalledExpression(node: ts.CallExpression): ts.Expression {
     return ts.skipOuterExpressions(node.expression);
 }
+
+function getCallContext(node: ts.CallExpression): {
+    kind: 'return' | 'variable-declaration' | 'destructuring' | 'expression';
+    variableName?: string;
+    destructuredNames?: string[];
+} {
+    const parent = node.parent;
+
+    // Case 1: return method()
+    if (ts.isReturnStatement(parent) && parent.expression === node) {
+        return { kind: 'return' };
+    }
+
+    // Case 2: const [a, b] = method() - destructuring
+    if (ts.isVariableDeclaration(parent) &&
+      parent.initializer === node &&
+      ts.isArrayBindingPattern(parent.name)) {
+        const names = parent.name.elements.map(elem => {
+            // OmittedExpression не имеет name (например: const [a, , c] = ...)
+            if (ts.isOmittedExpression(elem)) {
+                return undefined;
+            }
+            // BindingElement имеет name
+            if (ts.isIdentifier(elem.name)) {
+                return elem.name.text;
+            }
+            return undefined;
+        }).filter((name): name is string => name !== undefined);
+        return { kind: 'destructuring', destructuredNames: names };
+    }
+
+
+    // Case 3: const res = method() - variable declaration
+    if (ts.isVariableDeclaration(parent) &&
+      parent.initializer === node &&
+      ts.isIdentifier(parent.name)) {
+        return { kind: 'variable-declaration', variableName: parent.name.text };
+    }
+
+    // Case 4: Other contexts (expressions, arguments, etc.)
+    return { kind: 'expression' };
+}
+
+function tryTransformInlineCall(
+  context: TransformationContext,
+  node: ts.CallExpression
+): lua.Expression | undefined {
+
+    const calledExpression = getCalledExpression(node);
+
+    // Get the symbol of the called expression
+    let symbol: ts.Symbol | undefined;
+    if (ts.isIdentifier(calledExpression)) {
+        symbol = context.checker.getSymbolAtLocation(calledExpression);
+    } else if (ts.isPropertyAccessExpression(calledExpression) || ts.isElementAccessExpression(calledExpression)) {
+        symbol = context.checker.getSymbolAtLocation(calledExpression);
+    }
+
+    if (!symbol) return undefined;
+
+    // Resolve aliased symbols (imports) to their original declaration
+    if (symbol.flags & ts.SymbolFlags.Alias) {
+        symbol = context.checker.getAliasedSymbol(symbol);
+    }
+
+    // Check if this is an inline function
+    const inlineInfo = context.inlineFunctions.get(symbol);
+    if (!inlineInfo) return undefined;
+
+    const result = prepareInlineBody(context, inlineInfo, node.arguments);
+
+    const callCtx = getCallContext(node);
+    console.log(`Inline function ${symbol.name} called, Result = {hasMultiReturn=${result.hasMultiReturn},returnExpressions=${result.returnExpressions.length},paramAssignments=${result.paramAssignments.length},hasMultiReturn=${result.hasMultiReturn},target=${callCtx.kind},isReturn=${callCtx.kind==='return'}}`)
+    let target: { kind: 'variables'; vars: lua.Identifier[] } | undefined;
+    if (callCtx.kind === 'variable-declaration') {
+        target = { kind: 'variables', vars: [lua.createIdentifier(callCtx.variableName!)] };
+    } else if (callCtx.kind === 'destructuring') {
+        target = { kind: 'variables', vars: callCtx.destructuredNames!.map(n => lua.createIdentifier(n)) };
+    }
+
+    return embedInlineResult(
+      context,
+      [...result.paramAssignments, ...result.bodyStatements],
+      result.returnExpressions,
+      result.hasMultiReturn,
+      target,
+      callCtx.kind === 'return'
+    );
+}
+

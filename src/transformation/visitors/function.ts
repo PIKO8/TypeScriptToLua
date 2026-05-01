@@ -20,6 +20,13 @@ import { isAsyncFunction, wrapInAsyncAwaiter } from "./async-await";
 import { transformIdentifier } from "./identifier";
 import { transformExpressionBodyToReturnStatement } from "./return";
 import { transformBindingPattern } from "./variable-declaration";
+import {
+    inlineComplexBody,
+    inlineMethodNotSupported,
+    inlineNestedInlineCall,
+    inlineRecursiveCall,
+} from "../utils/diagnostics";
+import { isInlineFunctionCandidate } from "../utils/inline";
 
 function transformParameterDefaultValueDeclaration(
     context: TransformationContext,
@@ -92,6 +99,97 @@ export function isFunctionTypeWithProperties(context: TransformationContext, fun
             getExtensionKindForType(context, functionType) === undefined // ignore TSTL extension functions like $range
         );
     }
+}
+
+function validateInlineFunctionBody(_context: TransformationContext, body: ts.ConciseBody): boolean {
+    // Arrow functions with expression bodies are always OK
+    if (!ts.isBlock(body)) {
+        return true;
+    }
+
+    // For block bodies, check that they only contain a single return statement
+    if (body.statements.length !== 1) {
+        return false;
+    }
+
+    const statement = body.statements[0];
+    if (!ts.isReturnStatement(statement) || !statement.expression) {
+        return false;
+    }
+
+    return true;
+}
+
+function checkInlineFunctionCalls(
+    context: TransformationContext,
+    node: ts.Node,
+    currentFunctionSymbol: ts.Symbol
+): void {
+    // Recursively check all call expressions in the function body
+    function visit(child: ts.Node): void {
+        if (ts.isCallExpression(child)) {
+            const signature = context.checker.getResolvedSignature(child);
+            if (signature?.declaration) {
+                const calledSymbol = context.checker.getSymbolAtLocation(child.expression);
+                if (calledSymbol) {
+                    // Check if calling itself (recursive)
+                    if (calledSymbol === currentFunctionSymbol) {
+                        context.diagnostics.push(inlineRecursiveCall(child));
+                        return;
+                    }
+
+                    // Check if calling another inline function
+                    const inlineInfo = context.inlineFunctions.get(calledSymbol);
+                    if (inlineInfo) {
+                        context.diagnostics.push(inlineNestedInlineCall(child));
+                        return;
+                    }
+                }
+            }
+        }
+
+        ts.forEachChild(child, visit);
+    }
+
+    visit(node);
+}
+
+function registerInlineFunction(
+    context: TransformationContext,
+    node: ts.FunctionDeclaration | ts.FunctionExpression
+): boolean {
+    if (!node.name) return false;
+
+    const symbol = context.checker.getSymbolAtLocation(node.name);
+    if (!symbol) return false;
+
+    // Validate that it's not a method or accessor
+    if (ts.isMethodDeclaration(node) || ts.isAccessor(node)) {
+        context.diagnostics.push(inlineMethodNotSupported(node));
+        return false;
+    }
+
+    // Validate body complexity
+    if (node.body && !validateInlineFunctionBody(context, node.body)) {
+        context.diagnostics.push(inlineComplexBody(node));
+        return false;
+    }
+
+    // Check for recursive calls and calls to other inline functions
+    if (node.body) {
+        checkInlineFunctionCalls(context, node.body, symbol);
+    }
+
+    // Register the inline function
+    context.inlineFunctions.set(symbol, {
+        node,
+        parameters: node.parameters,
+        body: node.body!,
+        sourceFile: node.getSourceFile(),
+        isProcessing: false,
+    });
+
+    return true;
 }
 
 export function transformFunctionBodyContent(context: TransformationContext, body: ts.ConciseBody): lua.Statement[] {
@@ -286,6 +384,15 @@ export function transformFunctionLikeDeclaration(
         return lua.createNilLiteral();
     }
 
+    // Check if this is an inline function (for function expressions)
+    if ((ts.isFunctionExpression(node) || ts.isArrowFunction(node)) && isInlineFunctionCandidate(context, node)) {
+        if (ts.isFunctionExpression(node) && node.name) {
+            registerInlineFunction(context, node);
+        }
+        // For arrow functions and unnamed function expressions, we can't really inline them
+        // as they're anonymous. Fall through to normal transformation.
+    }
+
     const [functionExpression, functionScope] = transformFunctionToExpression(context, node);
 
     const isNamedFunctionExpression = ts.isFunctionExpression(node) && node.name;
@@ -324,6 +431,16 @@ export function transformFunctionLikeDeclaration(
 export const transformFunctionDeclaration: FunctionVisitor<ts.FunctionDeclaration> = (node, context) => {
     // Don't transform functions without body (overload declarations)
     if (node.body === undefined) {
+        return undefined;
+    }
+
+    // Check if this is an inline function
+    if (isInlineFunctionCandidate(context, node)) {
+        const registered = registerInlineFunction(context, node);
+        if (context.options.tstlVerbose && registered) {
+            console.log(`[INLINE] Registered inline function: ${(node.name as ts.Identifier).text}`);
+        }
+        // Inline functions don't generate Lua code
         return undefined;
     }
 

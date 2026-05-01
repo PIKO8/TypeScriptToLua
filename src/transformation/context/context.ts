@@ -10,6 +10,27 @@ import { SymbolInfo } from "../utils/symbols";
 import { LuaLibFeature } from "../../LuaLib";
 import { Scope, ScopeType } from "../utils/scope";
 import { ClassSuperInfo } from "../visitors/class";
+import { NodeArray, ParameterDeclaration } from "typescript";
+
+export interface InlineFunctionInfo {
+    node: ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction;
+    parameters: NodeArray<ParameterDeclaration>;
+    body: ts.ConciseBody;
+    sourceFile: ts.SourceFile;
+    isProcessing: boolean;
+}
+
+// Shared registry of inline functions across all files in a program
+const programInlineFunctions = new WeakMap<ts.Program, Map<ts.Symbol, InlineFunctionInfo>>();
+
+export function getOrCreateProgramInlineFunctions(program: ts.Program): Map<ts.Symbol, InlineFunctionInfo> {
+    let inlineFunctions = programInlineFunctions.get(program);
+    if (!inlineFunctions) {
+        inlineFunctions = new Map();
+        programInlineFunctions.set(program, inlineFunctions);
+    }
+    return inlineFunctions;
+}
 
 export const tempSymbolId = -1 as lua.SymbolId;
 
@@ -43,12 +64,18 @@ export class TransformationContext {
         (this.options.alwaysStrict ?? this.options.strict) ||
         (this.isModule && this.options.target !== undefined && this.options.target >= ts.ScriptTarget.ES2015);
 
+    // Reference to the shared inline functions registry for this program
+    public readonly inlineFunctions: Map<ts.Symbol, InlineFunctionInfo>;
+
     constructor(public program: ts.Program, public sourceFile: ts.SourceFile, private visitorMap: VisitorMap) {
         // Use `getParseTreeNode` to get original SourceFile node, before it was substituted by custom transformers.
         // It's required because otherwise `getEmitResolver` won't use cached diagnostics, produced in `emitWorker`
         // and would try to re-analyze the file, which would fail because of replaced nodes.
         const originalSourceFile = ts.getParseTreeNode(sourceFile, ts.isSourceFile) ?? sourceFile;
         this.resolver = this.checker.getEmitResolver(originalSourceFile);
+
+        // Initialize reference to shared inline functions registry
+        this.inlineFunctions = getOrCreateProgramInlineFunctions(program);
     }
 
     private currentNodeVisitors: ReadonlyArray<FunctionVisitor<ts.Node>> = [];

@@ -176,3 +176,17 @@ export const incompleteFieldDecoratorWarning = createWarningDiagnosticFactory(
 export const unsupportedArrayWithLengthConstructor = createErrorDiagnosticFactory(
     `Constructing new Array with length is not supported.`
 );
+
+export const inlineRecursiveCall = createErrorDiagnosticFactory("Inline functions cannot call themselves recursively.");
+
+export const inlineNestedInlineCall = createErrorDiagnosticFactory(
+    "Inline functions cannot call other inline functions."
+);
+
+export const inlineComplexBody = createErrorDiagnosticFactory(
+    "Inline functions must have a simple return expression body (no statements, loops, or complex control flow)."
+);
+
+export const inlineMethodNotSupported = createErrorDiagnosticFactory(
+    "Inline annotation is not supported on class methods and accessors."
+);

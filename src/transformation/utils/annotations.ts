@@ -7,6 +7,7 @@ export enum AnnotationKind {
     NoSelf = "noSelf",
     CustomName = "customName",
     NoSelfInFile = "noSelfInFile",
+    Inline = "inline",
 }
 
 const annotationValues = new Map(Object.values(AnnotationKind).map(k => [k.toLowerCase(), k]));

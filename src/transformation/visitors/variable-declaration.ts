@@ -10,9 +10,33 @@ import { LuaLibFeature, transformLuaLibFunction } from "../utils/lualib";
 import { transformInPrecedingStatementScope } from "../utils/preceding-statements";
 import { createCallableTable, isFunctionTypeWithProperties } from "./function";
 import { transformIdentifier } from "./identifier";
-import { isMultiReturnCall } from "./language-extensions/multi";
+import {isMultiReturnCall} from "./language-extensions/multi";
 import { transformPropertyName } from "./literal";
 import { moveToPrecedingTemp, transformExpressionList } from "./expression-list";
+import {createInlineAssignment, prepareInlineBody} from "../utils/inline";
+
+// Helper to check if an expression is an inline function call
+function isInlineFunctionCall(context: TransformationContext, expression: ts.Expression): boolean {
+    if (!ts.isCallExpression(expression)) return false;
+
+    const calledExpression = getCalledExpression(expression);
+    let symbol: ts.Symbol | undefined;
+
+    if (ts.isIdentifier(calledExpression)) {
+        symbol = context.checker.getSymbolAtLocation(calledExpression);
+    } else if (ts.isPropertyAccessExpression(calledExpression) || ts.isElementAccessExpression(calledExpression)) {
+        symbol = context.checker.getSymbolAtLocation(calledExpression);
+    }
+
+    if (!symbol) return false;
+
+    // Resolve aliased symbols
+    if (symbol.flags & ts.SymbolFlags.Alias) {
+        symbol = context.checker.getAliasedSymbol(symbol);
+    }
+
+    return context.inlineFunctions.has(symbol);
+}
 
 export function transformArrayBindingElement(
     context: TransformationContext,
@@ -258,6 +282,13 @@ export function transformVariableDeclaration(
     if (ts.isIdentifier(statement.name)) {
         // Find variable identifier
         const identifierName = transformIdentifier(context, statement.name);
+
+        // Check if initializer is an inline function call
+        if (statement.initializer && isInlineFunctionCall(context, statement.initializer)) {
+            // Handle inline function specially
+            return transformInlineFunctionVariableDeclaration(context, statement, identifierName);
+        }
+
         const value = statement.initializer && context.transformExpression(statement.initializer);
 
         // Wrap functions being assigned to a type that contains additional properties in a callable table
@@ -266,6 +297,12 @@ export function transformVariableDeclaration(
 
         return createLocalOrExportedOrGlobalDeclaration(context, identifierName, wrappedValue, statement);
     } else if (ts.isArrayBindingPattern(statement.name) || ts.isObjectBindingPattern(statement.name)) {
+        // Check if initializer is an inline function call with multi-return
+        if (statement.initializer && isInlineFunctionCall(context, statement.initializer)) {
+            const vars = statement.name.elements.map(e => transformArrayBindingElement(context, e));
+            return transformInlineFunctionDestructuringDeclaration(context, statement, vars);
+        }
+
         return transformBindingVariableDeclaration(context, statement.name, statement.initializer);
     } else {
         return assertNever(statement.name);
@@ -280,6 +317,115 @@ export function transformVariableDeclaration(
         if (ts.isFunctionExpression(initializer) && initializer.name) return false;
         return isFunctionTypeWithProperties(context, context.checker.getTypeAtLocation(statement.name));
     }
+}
+
+// Helper to transform variable declaration with inline function
+function transformInlineFunctionVariableDeclaration(
+    context: TransformationContext,
+    statement: ts.VariableDeclaration,
+    variableName: lua.Identifier
+): lua.Statement[] {
+    assert(statement.initializer);
+
+    // Get the inline function info
+    if (!ts.isCallExpression(statement.initializer)) {
+        // Fallback to normal transformation
+        const value = context.transformExpression(statement.initializer);
+        return createLocalOrExportedOrGlobalDeclaration(context, variableName, value, statement);
+    }
+
+    const calledExpression = getCalledExpression(statement.initializer);
+    let symbol: ts.Symbol | undefined;
+
+    if (ts.isIdentifier(calledExpression)) {
+        symbol = context.checker.getSymbolAtLocation(calledExpression);
+    }
+
+    if (!symbol) {
+        const value = context.transformExpression(statement.initializer);
+        return createLocalOrExportedOrGlobalDeclaration(context, variableName, value, statement);
+    }
+
+    if (symbol.flags & ts.SymbolFlags.Alias) {
+        symbol = context.checker.getAliasedSymbol(symbol);
+    }
+
+    const inlineInfo = context.inlineFunctions.get(symbol);
+    if (!inlineInfo) {
+        const value = context.transformExpression(statement.initializer);
+        return createLocalOrExportedOrGlobalDeclaration(context, variableName, value, statement);
+    }
+
+    const result = prepareInlineBody(context, inlineInfo, statement.initializer.arguments);
+
+    // Объявляем переменную с nil
+    const localDecl = lua.createVariableDeclarationStatement(variableName, lua.createNilLiteral());
+
+    // do...end с присваиванием
+    const doBlock = createInlineAssignment(
+      [...result.paramAssignments, ...result.bodyStatements],
+      result.returnExpressions,
+      result.hasMultiReturn,
+      [variableName]
+    );
+
+    return [localDecl, doBlock];
+}
+
+// Helper for destructuring
+function transformInlineFunctionDestructuringDeclaration(
+    context: TransformationContext,
+    statement: ts.VariableDeclaration,
+    variableNames: lua.Identifier[]
+): lua.Statement[] {
+    assert(statement.initializer);
+
+    if (!ts.isCallExpression(statement.initializer)) {
+        return transformBindingVariableDeclaration(context, statement.name as ts.BindingPattern, statement.initializer);
+    }
+
+    const calledExpression = getCalledExpression(statement.initializer);
+    let symbol: ts.Symbol | undefined;
+
+    if (ts.isIdentifier(calledExpression)) {
+        symbol = context.checker.getSymbolAtLocation(calledExpression);
+    }
+
+    if (!symbol) {
+        return transformBindingVariableDeclaration(context, statement.name as ts.BindingPattern, statement.initializer);
+    }
+
+    if (symbol.flags & ts.SymbolFlags.Alias) {
+        symbol = context.checker.getAliasedSymbol(symbol);
+    }
+
+    const inlineInfo = context.inlineFunctions.get(symbol);
+    if (!inlineInfo) {
+        return transformBindingVariableDeclaration(context, statement.name as ts.BindingPattern, statement.initializer);
+    }
+
+    const result = prepareInlineBody(context, inlineInfo, statement.initializer.arguments);
+
+    // local a, b = nil, nil
+    const localDecl = lua.createVariableDeclarationStatement(variableNames, lua.createNilLiteral());
+
+    const doBlock = createInlineAssignment(
+      [...result.paramAssignments, ...result.bodyStatements],
+      result.returnExpressions,
+      result.hasMultiReturn,
+      variableNames
+    );
+
+    return [localDecl, doBlock];
+}
+
+
+function getCalledExpression(node: ts.CallExpression): ts.Expression {
+    let expr: ts.Expression = node.expression;
+    while (ts.isParenthesizedExpression(expr)) {
+        expr = expr.expression;
+    }
+    return expr;
 }
 
 export function checkVariableDeclarationList(context: TransformationContext, node: ts.VariableDeclarationList): void {
