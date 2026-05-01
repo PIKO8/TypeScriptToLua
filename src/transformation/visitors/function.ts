@@ -21,7 +21,6 @@ import { transformIdentifier } from "./identifier";
 import { transformExpressionBodyToReturnStatement } from "./return";
 import { transformBindingPattern } from "./variable-declaration";
 import {
-    inlineComplexBody,
     inlineMethodNotSupported,
     inlineNestedInlineCall,
     inlineRecursiveCall,
@@ -101,24 +100,24 @@ export function isFunctionTypeWithProperties(context: TransformationContext, fun
     }
 }
 
-function validateInlineFunctionBody(_context: TransformationContext, body: ts.ConciseBody): boolean {
-    // Arrow functions with expression bodies are always OK
-    if (!ts.isBlock(body)) {
-        return true;
-    }
-
-    // For block bodies, check that they only contain a single return statement
-    if (body.statements.length !== 1) {
-        return false;
-    }
-
-    const statement = body.statements[0];
-    if (!ts.isReturnStatement(statement) || !statement.expression) {
-        return false;
-    }
-
-    return true;
-}
+// function validateInlineFunctionBody(_context: TransformationContext, body: ts.ConciseBody): boolean {
+//     // Arrow functions with expression bodies are always OK
+//     if (!ts.isBlock(body)) {
+//         return true;
+//     }
+//
+//     // For block bodies, check that they only contain a single return statement
+//     if (body.statements.length !== 1) {
+//         return false;
+//     }
+//
+//     const statement = body.statements[0];
+//     if (!ts.isReturnStatement(statement) || !statement.expression) {
+//         return false;
+//     }
+//
+//     return true;
+// }
 
 function checkInlineFunctionCalls(
     context: TransformationContext,
@@ -169,11 +168,11 @@ function registerInlineFunction(
         return false;
     }
 
-    // Validate body complexity
-    if (node.body && !validateInlineFunctionBody(context, node.body)) {
-        context.diagnostics.push(inlineComplexBody(node));
-        return false;
-    }
+    // // Validate body complexity
+    // if (node.body && !validateInlineFunctionBody(context, node.body)) {
+    //     context.diagnostics.push(inlineComplexBody(node));
+    //     return false;
+    // }
 
     // Check for recursive calls and calls to other inline functions
     if (node.body) {

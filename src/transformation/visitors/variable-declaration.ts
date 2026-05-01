@@ -358,6 +358,11 @@ function transformInlineFunctionVariableDeclaration(
 
     const result = prepareInlineBody(context, inlineInfo, statement.initializer.arguments);
 
+    if (result.paramAssignments.length === 0 && result.bodyStatements.length === 0) {
+        const value = result.hasMultiReturn ? result.returnExpressions[0] : result.returnExpressions[0];
+        return createLocalOrExportedOrGlobalDeclaration(context, variableName, value, statement);
+    }
+
     // Объявляем переменную с nil
     const localDecl = lua.createVariableDeclarationStatement(variableName, lua.createNilLiteral());
 
@@ -405,6 +410,11 @@ function transformInlineFunctionDestructuringDeclaration(
     }
 
     const result = prepareInlineBody(context, inlineInfo, statement.initializer.arguments);
+
+    if (result.paramAssignments.length === 0 && result.bodyStatements.length === 0) {
+        const value = result.hasMultiReturn ? result.returnExpressions : result.returnExpressions[0];
+        return createLocalOrExportedOrGlobalDeclaration(context, variableNames, value, statement);
+    }
 
     // local a, b = nil, nil
     const localDecl = lua.createVariableDeclarationStatement(variableNames, lua.createNilLiteral());

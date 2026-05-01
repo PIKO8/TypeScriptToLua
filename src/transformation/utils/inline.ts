@@ -14,22 +14,15 @@ interface InlineBodyResult {
 
 // AST transformer to substitute parameter identifiers with temp variables
 function createParameterSubstitutionTransformer(
-  paramReplacements: Map<string, string>
+  paramReplacements: Map<string, ts.Expression>
 ): ts.TransformerFactory<ts.Node> {
-  return (context: ts.TransformationContext) => {
+  return (ctx: ts.TransformationContext) => {
     const visit = (node: ts.Node): ts.Node => {
-      // Replace identifier if it matches a parameter
-      if (ts.isIdentifier(node)) {
-        const replacementName = paramReplacements.get(node.text);
-        if (replacementName) {
-          return ts.factory.createIdentifier(replacementName);
-        }
+      if (ts.isIdentifier(node) && paramReplacements.has(node.text)) {
+        return paramReplacements.get(node.text)!
       }
-
-      // Recursively visit children
-      return ts.visitEachChild(node, visit, context);
+      return ts.visitEachChild(node, visit, ctx);
     };
-
     return visit;
   };
 }
@@ -45,24 +38,38 @@ export function prepareInlineBody(
   inlineInfo.isProcessing = true;
   try {
     const { body, parameters } = inlineInfo;
-    const paramReplacements = new Map<string, string>();
+
+    const paramReplacements = new Map<string, ts.Expression>();
     const paramAssignments: lua.Statement[] = [];
+    const paramNames = new Set<string>();
+    for (const param of parameters) {
+      if (ts.isIdentifier(param.name) && param.name.text !== "this") {
+        paramNames.add(param.name.text);
+      }
+    }
+
+    const usageCounts = countParamUsages(body, paramNames);
 
     let argIndex = 0;
     for (const param of parameters) {
       if (ts.isIdentifier(param.name) && param.name.text !== "this") {
         const paramName = param.name.text;
-        const tempName = context.createTempName(paramName);
-        paramReplacements.set(paramName, tempName);
-
         const arg = argIndex < args.length ? args[argIndex] : undefined;
-        const transformedArg = arg ? context.transformExpression(arg) : lua.createNilLiteral();
-        paramAssignments.push(
-          lua.createVariableDeclarationStatement(
-            lua.createIdentifier(tempName),
-            transformedArg
-          )
-        );
+        const tsArg = arg ?? ts.factory.createNull();
+
+        const usage = usageCounts.get(paramName) ?? 0;
+        if (usage === 1) {
+          // Прямая подстановка аргумента
+          paramReplacements.set(paramName, tsArg);
+          // temp не создаётся
+        } else {
+          const tempName = context.createTempName(paramName);
+          paramReplacements.set(paramName, ts.factory.createIdentifier(tempName));
+          const transformedArg = arg ? context.transformExpression(arg) : lua.createNilLiteral();
+          paramAssignments.push(
+            lua.createVariableDeclarationStatement(lua.createIdentifier(tempName), transformedArg)
+          );
+        }
         argIndex++;
       }
     }
@@ -102,6 +109,21 @@ export function prepareInlineBody(
   }
 }
 
+function countParamUsages(body: ts.ConciseBody, paramNames: Set<string>): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const name of paramNames) counts.set(name, 0);
+
+  function visit(node: ts.Node) {
+    if (ts.isIdentifier(node) && counts.has(node.text)) {
+      counts.set(node.text, counts.get(node.text)! + 1);
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  visit(body);
+  return counts;
+}
+
 export function embedInlineResult(
   context: TransformationContext,
   paramAndBodyStmts: lua.Statement[],
@@ -113,6 +135,34 @@ export function embedInlineResult(
   },
   isReturnContext?: boolean // true, если вызов был внутри return
 ): lua.Expression {
+  // Оптимизация: если нет промежуточных стейтментов, можно обойтись без do...end
+  if (paramAndBodyStmts.length === 0) {
+    if (isReturnContext) {
+      // Для return вставляем return-стейтмент напрямую, без do...end
+      context.addPrecedingStatements([
+        lua.createReturnStatement(hasMulti ? returnExprs : returnExprs)
+      ]);
+      return lua.createNilLiteral();
+    }
+
+    if (target) {
+      if (target.vars.length > 1) {
+        // Деструктуризация (обычно обрабатывается в variable-declaration, но на всякий случай)
+        context.addPrecedingStatements([
+          lua.createAssignmentStatement(target.vars, hasMulti ? returnExprs : [returnExprs[0]])
+        ]);
+        return lua.createNilLiteral();
+      } else {
+        // Одна переменная — возвращаем значение для присваивания (используется call.ts)
+        // Не добавляем preceding statements, возвращаем само выражение
+        return hasMulti ? returnExprs[0] : returnExprs[0];
+      }
+    }
+
+    // Expression-контекст: просто возвращаем первое выражение
+    return returnExprs[0];
+  }
+
   const allStmts = [...paramAndBodyStmts];
 
   if (isReturnContext) {
