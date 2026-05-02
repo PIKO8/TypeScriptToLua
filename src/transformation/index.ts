@@ -58,7 +58,6 @@ function collectInlineFunctionsFromSourceFile(program: ts.Program, sourceFile: t
                         parameters: node.parameters,
                         body: node.body,
                         sourceFile,
-                        isProcessing: false,
                     });
                 }
             }
@@ -81,7 +80,6 @@ function collectInlineFunctionsFromSourceFile(program: ts.Program, sourceFile: t
                                 parameters: declaration.initializer.parameters,
                                 body: declaration.initializer.body,
                                 sourceFile,
-                                isProcessing: false,
                             });
                         }
                     }

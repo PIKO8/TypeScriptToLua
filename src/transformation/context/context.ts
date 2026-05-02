@@ -17,7 +17,6 @@ export interface InlineFunctionInfo {
     parameters: NodeArray<ParameterDeclaration>;
     body: ts.ConciseBody;
     sourceFile: ts.SourceFile;
-    isProcessing: boolean;
 }
 
 // Shared registry of inline functions across all files in a program

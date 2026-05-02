@@ -363,8 +363,8 @@ function transformInlineFunctionVariableDeclaration(
         return createLocalOrExportedOrGlobalDeclaration(context, variableName, value, statement);
     }
 
-    // Объявляем переменную с nil
-    const localDecl = lua.createVariableDeclarationStatement(variableName, lua.createNilLiteral());
+    // Объявляем переменную
+    const localDecl = lua.createVariableDeclarationStatement(variableName);
 
     // do...end с присваиванием
     const doBlock = createInlineAssignment(
@@ -416,8 +416,8 @@ function transformInlineFunctionDestructuringDeclaration(
         return createLocalOrExportedOrGlobalDeclaration(context, variableNames, value, statement);
     }
 
-    // local a, b = nil, nil
-    const localDecl = lua.createVariableDeclarationStatement(variableNames, lua.createNilLiteral());
+    // local a, b
+    const localDecl = lua.createVariableDeclarationStatement(variableNames);
 
     const doBlock = createInlineAssignment(
       [...result.paramAssignments, ...result.bodyStatements],

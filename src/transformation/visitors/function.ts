@@ -185,7 +185,6 @@ function registerInlineFunction(
         parameters: node.parameters,
         body: node.body!,
         sourceFile: node.getSourceFile(),
-        isProcessing: false,
     });
 
     return true;
