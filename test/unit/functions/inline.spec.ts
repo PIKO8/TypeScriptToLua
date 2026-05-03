@@ -1,123 +1,92 @@
-// import * as util from "../../util";
-// import {
-//     inlineComplexBody,
-//     inlineNestedInlineCall,
-//     inlineRecursiveCall,
-// } from "../../../src/transformation/utils/diagnostics";
-//
-// describe("inline functions", () => {
-//     test("basic inline function", () => {
-//         util.testFunction`
-//             /** @inline */
-//             function add(a: number, b: number): number {
-//                 return a + b;
-//             }
-//
-//             const result = add(5, 3);
-//             return result;
-//         `.expectToEqual(8);
-//     });
-//
-//     test("inline arrow function", () => {
-//         util.testFunction`
-//             /** @inline */
-//             const multiply = (a: number, b: number): number => a * b;
-//
-//             const result = multiply(4, 5);
-//             return result;
-//         `.expectToEqual(20);
-//     });
-//
-//     test("inline function with expression body", () => {
-//         util.testFunction`
-//             /** @inline */
-//             function square(x: number): number {
-//                 return x * x;
-//             }
-//
-//             return square(7);
-//         `.expectToEqual(49);
-//     });
-//
-//     test("inline function called multiple times", () => {
-//         util.testFunction`
-//             /** @inline */
-//             function double(x: number): number {
-//                 return x * 2;
-//             }
-//
-//             const a = double(5);
-//             const b = double(10);
-//             return a + b;
-//         `.expectToEqual(30);
-//     });
-//
-//     test("inline function across files", () => {
-//         util.testModule`
-//             import { increment } from "./utils";
-//
-//             export const result = increment(10);
-//         `
-//             .addExtraFile(
-//                 "utils.ts",
-//                 `
-//                 /** @inline */
-//                 export function increment(x: number): number {
-//                     return x + 1;
-//                 }
-//                 `
-//             )
-//             .expectToMatchJsResult();
-//     });
-//
-//     test("inline function with complex expression", () => {
-//         util.testFunction`
-//             /** @inline */
-//             function clamp(value: number, min: number, max: number): number {
-//                 return value < min ? min : value > max ? max : value;
-//             }
-//
-//             return clamp(15, 0, 10);
-//         `.expectToEqual(10);
-//     });
-//
-//     // Validation tests
-//     test("recursive inline function should error", () => {
-//         util.testFunction`
-//             /** @inline */
-//             function factorial(n: number): number {
-//                 return n <= 1 ? 1 : n * factorial(n - 1);
-//             }
-//
-//             return factorial(5);
-//         `.expectDiagnosticsToMatchSnapshot([inlineRecursiveCall.code]);
-//     });
-//
-//     test("inline function calling another inline should error", () => {
-//         util.testFunction`
-//             /** @inline */
-//             function double(x: number): number {
-//                 return x * 2;
-//             }
-//
-//             /** @inline */
-//             function quadruple(x: number): number {
-//                 return double(double(x));
-//             }
-//
-//             return quadruple(5);
-//         `.expectDiagnosticsToMatchSnapshot([inlineNestedInlineCall.code]);
-//     });
-//
-//     test("inline function with complex body should error", () => {
-//         util.testFunction`
-//             /** @inline */
-//             function sum(a: number, b: number): number {
-//                 let result = a + b;
-//                 return result;
-//             }
-//
-//             return sum(5, 3);
-//         `.expectDiagnosticsToMatchSnapshot([inlineComplexBody.code]);
-//     });
-// });
+import * as util from "../../util";
+
+test("@inline simple scalars and expression lambdas", () => {
+    util.testModule`
+        /** @inline */
+        function add(a: number, b: number): number { return a + b; }
+        /** @inline */
+        function apply<T,R>(v: T, fn: (x: T) => R): R { return fn(v); }
+
+        export function test() {
+            const r1 = add(2, 3);
+            const r2 = apply(10, (x) => x * 2);
+            const r3 = apply(5, (x) => x + 1);
+            return [r1, r2, r3];
+        }
+    `.expectLuaToMatchSnapshot();
+});
+
+test("@inline block lambda and destructuring", () => {
+    util.testModule`
+        /** @inline */
+        function apply2<T,R>(v: T, fn: (x: T) => R): R { return fn(v); }
+        /** @inline */
+        function getPair(): LuaMultiReturn<[number, string]> { return $multi(42, "hello"); }
+
+        export function test() {
+            const r1 = apply2(5, (x) => {
+                const temp = x * 2;
+                return temp + 1;
+            });
+            const [num, str] = getPair();
+            return [r1, num, str];
+        }
+    `
+      .withLanguageExtensions()
+      .expectLuaToMatchSnapshot();
+});
+
+test("@inline in for and if", () => {
+    util.testModule`
+        /** @inline */
+        function filter<T>(arr: T[], pred: (x: T) => boolean): T[] {
+            const result: T[] = [];
+            for (const item of arr) {
+                if (pred(item)) result.push(item);
+            }
+            return result;
+        }
+
+        export function test() {
+            const data = [1,2,3,4,5,6];
+            const evens = filter(data, (n) => n % 2 == 0);
+            const withBlock = filter(data, (n) => {
+                if (n == 3) return true;
+                return n > 4;
+            });
+            return [evens, withBlock];
+        }
+    `.expectLuaToMatchSnapshot();
+});
+
+test("@inline chained and multi-return lambda", () => {
+    util.testModule`
+        /** @inline */
+        function apply<T,R>(v: T, fn: (x: T) => R): R { return fn(v); }
+        /** @inline */
+        function choose<T>(cond: boolean, onTrue: () => T, onFalse: () => T): T {
+            return cond ? onTrue() : onFalse();
+        }
+
+        export function test() {
+            const a = apply(3, (x) => apply(x, (y) => y * 2));
+            const b = choose(true, () => 100, () => 200);
+            return [a, b];
+        }
+    `.expectLuaToMatchSnapshot();
+});
+
+test("@inline side effects and closure", () => {
+    util.testModule`
+        /** @inline */
+        function forEach<T>(arr: T[], body: (x: T) => void): void {
+            for (const item of arr) { body(item); }
+        }
+
+        export function test() {
+            let sum = 0;
+            forEach([1,2,3], (n) => { sum += n; });
+            return sum;
+        }
+    `.expectLuaToMatchSnapshot();
+});

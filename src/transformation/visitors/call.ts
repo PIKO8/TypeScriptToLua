@@ -380,6 +380,7 @@ function tryTransformInlineCall(
 
     return embedInlineResult(
       context,
+      symbol.name,
       [...result.paramAssignments, ...result.bodyStatements],
       result.returnExpressions,
       result.hasMultiReturn,

@@ -365,9 +365,13 @@ function transformInlineFunctionVariableDeclaration(
 
     // Объявляем переменную
     const localDecl = lua.createVariableDeclarationStatement(variableName);
+    if (context.options.inlineGenerateComment) {
+        localDecl.leadingComments = [`Start inline ${symbol.name}`]
+    }
 
     // do...end с присваиванием
     const doBlock = createInlineAssignment(
+      context, symbol.name,
       [...result.paramAssignments, ...result.bodyStatements],
       result.returnExpressions,
       result.hasMultiReturn,
@@ -418,8 +422,12 @@ function transformInlineFunctionDestructuringDeclaration(
 
     // local a, b
     const localDecl = lua.createVariableDeclarationStatement(variableNames);
+    if (context.options.inlineGenerateComment) {
+        localDecl.leadingComments = [`Start inline ${symbol.name}`]
+    }
 
     const doBlock = createInlineAssignment(
+      context, symbol.name,
       [...result.paramAssignments, ...result.bodyStatements],
       result.returnExpressions,
       result.hasMultiReturn,

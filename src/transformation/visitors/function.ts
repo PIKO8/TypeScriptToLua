@@ -439,7 +439,7 @@ export const transformFunctionDeclaration: FunctionVisitor<ts.FunctionDeclaratio
             console.log(`[INLINE] Registered inline function: ${(node.name as ts.Identifier).text}`);
         }
         // Inline functions don't generate Lua code
-        return undefined;
+        // return undefined; // There is no better way to generate for unforeseen circumstances
     }
 
     if (hasDefaultExportModifier(node)) {

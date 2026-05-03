@@ -90,6 +90,11 @@ export const optionDeclarations: CommandLineOption[] = [
         type: "boolean",
     },
     {
+        name: "inlineGenerateComment",
+        description: "Adds a comment to inline areas after inline functions",
+        type: "boolean",
+    },
+    {
         name: "noResolvePaths",
         description: "An array of paths that tstl should not resolve and keep as-is.",
         type: "array",

@@ -1,0 +1,162 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`@inline block lambda and destructuring 1`] = `
+"local ____exports = {}
+---
+-- @inline
+local function apply2(self, v, fn)
+    return fn(nil, v)
+end
+---
+-- @inline
+local function getPair(self)
+    return 42, "hello"
+end
+function ____exports.test(self)
+    local r1
+    do
+        local ____lambdaResult_0 = nil
+        do
+            local temp = 5 * 2
+            ____lambdaResult_0 = temp + 1
+        end
+        r1 = ____lambdaResult_0
+    end
+    local num, str = 42, "hello"
+    return {r1, num, str}
+end
+return ____exports"
+`;
+
+exports[`@inline chained and multi-return lambda 1`] = `
+"local ____exports = {}
+---
+-- @inline
+local function apply(self, v, fn)
+    return fn(nil, v)
+end
+---
+-- @inline
+local function choose(self, cond, onTrue, onFalse)
+    local ____cond_0
+    if cond then
+        ____cond_0 = onTrue(nil)
+    else
+        ____cond_0 = onFalse(nil)
+    end
+    return ____cond_0
+end
+function ____exports.test(self)
+    return 3 * 2
+end
+return ____exports"
+`;
+
+exports[`@inline in for and if 1`] = `
+"local ____exports = {}
+---
+-- @inline
+local function filter(self, arr, pred)
+    local result = {}
+    for ____, item in ipairs(arr) do
+        if pred(nil, item) then
+            result[#result + 1] = item
+        end
+    end
+    return result
+end
+function ____exports.test(self)
+    local data = {
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+    }
+    local evens
+    do
+        local result = {}
+        for ____, item in ipairs(data) do
+            if item % 2 == 0 then
+                result[#result + 1] = item
+            end
+        end
+        evens = result
+    end
+    local withBlock
+    do
+        local result
+        result = {}
+        for ____, item in ipairs(data) do
+            local ____lambdaResult_0 = nil
+            do
+                local ____done_____lambdaResult_0 = false
+                if item == 3 then
+                    if not ____done_____lambdaResult_0 then
+                        ____lambdaResult_0 = true
+                        ____done_____lambdaResult_0 = true
+                    end
+                end
+                if not ____done_____lambdaResult_0 then
+                    ____lambdaResult_0 = item > 4
+                    ____done_____lambdaResult_0 = true
+                end
+            end
+            if ____lambdaResult_0 then
+                result[#result + 1] = item
+            end
+        end
+        withBlock = result
+    end
+    return {evens, withBlock}
+end
+return ____exports"
+`;
+
+exports[`@inline side effects and closure 1`] = `
+"local ____exports = {}
+---
+-- @inline
+local function forEach(self, arr, body)
+    for ____, item in ipairs(arr) do
+        body(nil, item)
+    end
+end
+function ____exports.test(self)
+    local sum = 0
+    do
+        for ____, item in ipairs({1, 2, 3}) do
+            local ____lambdaResult_0 = nil
+            do
+                local ____done_____lambdaResult_0 = false
+                sum = sum + item
+            end
+        end
+        local ____inline_result_1
+    end
+    return sum
+end
+return ____exports"
+`;
+
+exports[`@inline simple scalars and expression lambdas 1`] = `
+"local ____exports = {}
+---
+-- @inline
+local function add(self, a, b)
+    return a + b
+end
+---
+-- @inline
+local function apply(self, v, fn)
+    return fn(nil, v)
+end
+function ____exports.test(self)
+    local r1 = 2 + 3
+    local r2 = 10 * 2
+    local r3 = 5 + 1
+    return {r1, r2, r3}
+end
+return ____exports"
+`;
