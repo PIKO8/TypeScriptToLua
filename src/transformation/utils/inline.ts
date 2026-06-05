@@ -1,9 +1,11 @@
 import ts, {SignatureDeclaration} from "typescript";
+import {CompilerOptions, LuaTarget} from "../../CompilerOptions";
 import { TransformationContext } from "../context";
 import { InlineFunctionInfo } from "../context";
 import * as lua from "../../LuaAST";
+import * as luaVisitor from "../../LuaVisitor";
 import {isMultiFunctionCall} from "../visitors/language-extensions/multi";
-import {AnnotationKind, getNodeAnnotations, getSymbolAnnotations} from "./annotations";
+import {Annotation, AnnotationKind, getNodeAnnotations, getSymbolAnnotations} from "./annotations";
 import {internalUnknownError} from "./diagnostics";
 
 interface InlineBodyResult {
@@ -26,13 +28,34 @@ interface InlineLambdaBlockInfo {
   args: ts.NodeArray<ts.Expression>
 }
 
-// @ts-ignore
+export interface InlineContextExtend {
+  // eslint-disable-next-line @typescript-eslint/naming-convention
+  __inlineDepth: number
+}
+
 function linkParents(node: ts.Node, parent?: ts.Node): ts.Node {
   if (parent !== undefined && node.parent === undefined) {
     (node as any).parent = parent;
   }
   ts.forEachChild(node, child => linkParents(child, node));
   return node;
+}
+
+export function parseInlineAnnotationArgs(
+  options: CompilerOptions,
+  inlineAnnotation?: Annotation
+): { removeDeclaration: boolean } {
+  let removeDeclaration = options.inlineRemoveDefault ?? false;
+  if (!inlineAnnotation) return { removeDeclaration };
+  if (inlineAnnotation.args.length > 0) {
+    const arg = inlineAnnotation.args[0].toLowerCase();
+    if (arg === "toggle") {
+      removeDeclaration = !removeDeclaration
+    } else {
+      removeDeclaration = arg === 'true' || arg === '1';
+    }
+  }
+  return { removeDeclaration }
 }
 
 function createParameterSubstitutionTransformer(
@@ -74,6 +97,7 @@ function createParameterSubstitutionTransformer(
 }
 
 function expandStatement(
+  context: TransformationContext,
   stmt: ts.Statement,
   replacements: Map<string, InlineLambdaBlockInfo>
 ): ts.Statement[] {
@@ -81,23 +105,23 @@ function expandStatement(
 
   if (ts.isIfStatement(stmt)) {
     const thenBlock = ts.isBlock(stmt.thenStatement)
-      ? expandBlock(stmt.thenStatement, replacements)
+      ? expandBlock(context, stmt.thenStatement, replacements)
       : stmt.thenStatement;
     const elseBlock = stmt.elseStatement && ts.isBlock(stmt.elseStatement)
-      ? expandBlock(stmt.elseStatement, replacements)
+      ? expandBlock(context, stmt.elseStatement, replacements)
       : stmt.elseStatement;
 
     const usedTemps = getUsedTempIdentifiers(stmt.expression, tempNamesSet);
     const newStmt = ts.factory.createIfStatement(stmt.expression, thenBlock, elseBlock);
 
     if (usedTemps.length === 0) return [newStmt];
-    const newStmts = buildLambdasDeclarations(usedTemps, replacements);
+    const newStmts = buildLambdasDeclarations(context, usedTemps, replacements);
     newStmts.push(newStmt);
     return newStmts;
   }
 
   if (ts.isForStatement(stmt)) {
-    const newBody = expandBlock(stmt.statement as ts.Block, replacements);
+    const newBody = expandBlock(context, stmt.statement as ts.Block, replacements);
 
     // Проверяем только заголовочные части: initializer, condition, incrementor
     const usedTemps = [
@@ -109,13 +133,13 @@ function expandStatement(
     const newStmt = ts.factory.createForStatement(stmt.initializer, stmt.condition, stmt.incrementor, newBody);
 
     if (usedTemps.length === 0) return [newStmt];
-    const newStmts = buildLambdasDeclarations(usedTemps, replacements);
+    const newStmts = buildLambdasDeclarations(context, usedTemps, replacements);
     newStmts.push(newStmt);
     return newStmts;
   }
 
   if (ts.isForOfStatement(stmt)) {
-    const newBody = expandBlock(stmt.statement as ts.Block, replacements);
+    const newBody = expandBlock(context, stmt.statement as ts.Block, replacements);
 
     // Проверяем только expression и initializer
     const usedTemps = [
@@ -126,37 +150,38 @@ function expandStatement(
     const newStmt = ts.factory.createForOfStatement(stmt.awaitModifier, stmt.initializer, stmt.expression, newBody);
 
     if (usedTemps.length === 0) return [newStmt];
-    const newStmts = buildLambdasDeclarations(usedTemps, replacements);
+    const newStmts = buildLambdasDeclarations(context, usedTemps, replacements);
     newStmts.push(newStmt);
     return newStmts;
   }
 
   if (ts.isWhileStatement(stmt)) {
-    const newBody = expandBlock(stmt.statement as ts.Block, replacements);
+    const newBody = expandBlock(context, stmt.statement as ts.Block, replacements);
 
     // Проверяем только условие while
     const usedTemps = getUsedTempIdentifiers(stmt.expression, tempNamesSet);
     const newStmt = ts.factory.createWhileStatement(stmt.expression, newBody);
 
     if (usedTemps.length === 0) return [newStmt];
-    const newStmts = buildLambdasDeclarations(usedTemps, replacements);
+    const newStmts = buildLambdasDeclarations(context, usedTemps, replacements);
     newStmts.push(newStmt);
     return newStmts;
   }
 
   if (ts.isBlock(stmt)) {
-    return [expandBlock(stmt, replacements)];
+    return [expandBlock(context, stmt, replacements)];
   }
 
   // Простой стейтмент — проверяем полностью
   const usedTemps = getUsedTempIdentifiers(stmt, tempNamesSet);
   if (usedTemps.length === 0) return [stmt];
-  const newStmts = buildLambdasDeclarations(usedTemps, replacements);
+  const newStmts = buildLambdasDeclarations(context, usedTemps, replacements);
   newStmts.push(stmt);
   return newStmts;
 }
 
 function buildLambdasDeclarations(
+  context: TransformationContext,
   tempNames: string[],
   replacements: Map<string, InlineLambdaBlockInfo>
 ): ts.Statement[] {
@@ -175,15 +200,19 @@ function buildLambdasDeclarations(
       )
     );
     // do‑блок с телом лямбды
-    stmts.push(buildDoBlockForLambda(node, args, tempId));
+    stmts.push(buildDoBlockForLambda(context, node, args, tempId));
   }
   return stmts;
 }
 
-function expandBlock(block: ts.Block, replacements: Map<string, InlineLambdaBlockInfo>): ts.Block {
+function expandBlock(
+  context: TransformationContext,
+  block: ts.Block,
+  replacements: Map<string, InlineLambdaBlockInfo>
+): ts.Block {
   const newStatements: ts.Statement[] = [];
   for (const stmt of block.statements) {
-    newStatements.push(...expandStatement(stmt, replacements));
+    newStatements.push(...expandStatement(context, stmt, replacements));
   }
   return linkParents(ts.factory.createBlock(newStatements), block.parent) as ts.Block;
 }
@@ -210,49 +239,130 @@ function countAllReturns(node: ts.Node): number {
   return count;
 }
 
-function buildDoBlockForLambda(
-  funcNode: FunctionLikeExpression,
-  callArgs: ts.NodeArray<ts.Expression>,
-  resultVar: ts.Identifier
-): ts.Block {
-  const paramMap = new Map<string, ts.Expression>();
-  let argIdx = 0;
-  for (const p of funcNode.parameters) {
-    if (ts.isIdentifier(p.name) && p.name.text !== "this") {
-      const arg = argIdx < callArgs.length ? callArgs[argIdx] : ts.factory.createNull();
-      paramMap.set(p.name.text, arg);
-      argIdx++;
+// <editor-fold desc="Transforms Result for Goto">
+interface TransformResult {
+  statements: ts.Statement[];
+  hasGoto: boolean;
+}
+
+function transformStatementForGoto(
+  stmt: ts.Statement,
+  resultVar: ts.Identifier,
+  endLabel: string,
+  lastResult: ts.ReturnStatement | undefined
+): TransformResult {
+  if (ts.isReturnStatement(stmt)) {
+    const expr = stmt.expression ?? ts.factory.createNull();
+    if (lastResult && lastResult === stmt) {
+      return {
+        statements: [
+          ts.factory.createExpressionStatement(ts.factory.createAssignment(resultVar, expr))
+        ],
+        hasGoto: false
+      };
     }
-  }
-
-  const doneFlag = ts.factory.createIdentifier(`____done_${resultVar.text}`);
-
-  const paramSubstituter = (ctx: ts.TransformationContext) => {
-    const visit = (node: ts.Node): ts.Node => {
-      if (ts.isIdentifier(node) && paramMap.has(node.text)) {
-        return paramMap.get(node.text)!;
-      }
-      return ts.visitEachChild(node, visit, ctx);
+    return {
+      statements: [
+        ts.factory.createExpressionStatement(ts.factory.createAssignment(resultVar, expr)),
+        createGotoMarker(endLabel)
+      ],
+      hasGoto: true
     };
-    return visit;
-  };
-
-  const withParams = ts.transform(funcNode.body, [paramSubstituter]).transformed[0] as ts.Block;
-
-  const totalReturns = countAllReturns(withParams);
-  const lastStmt = withParams.statements[withParams.statements.length - 1];
-  const isSimpleReturn = totalReturns === 1 && ts.isReturnStatement(lastStmt);
-
-  if (isSimpleReturn) {
-    const nonReturnStmts = withParams.statements.filter(s => !ts.isReturnStatement(s));
-    const returnExpr = lastStmt.expression ?? ts.factory.createNull();
-    const finalStmts = [
-      ...nonReturnStmts,
-      ts.factory.createExpressionStatement(ts.factory.createAssignment(resultVar, returnExpr))
-    ];
-    return ts.setTextRange(ts.factory.createBlock(finalStmts, true), funcNode.body);
   }
 
+  if (ts.isIfStatement(stmt)) {
+    let thenResult: TransformResult;
+    if (ts.isBlock(stmt.thenStatement)) {
+      thenResult = transformBlockForGoto(stmt.thenStatement, resultVar, endLabel, lastResult);
+    } else {
+      thenResult = transformStatementForGoto(stmt.thenStatement, resultVar, endLabel, lastResult);
+    }
+    let elseResult: TransformResult | undefined;
+    if (stmt.elseStatement) {
+      if (ts.isBlock(stmt.elseStatement)) {
+        elseResult = transformBlockForGoto(stmt.elseStatement, resultVar, endLabel, lastResult);
+      } else {
+        elseResult = transformStatementForGoto(stmt.elseStatement, resultVar, endLabel, lastResult);
+      }
+    }
+
+    const thenBlock = thenResult.statements.length === 1 && !ts.isBlock(stmt.thenStatement)
+      ? thenResult.statements[0]
+      : ts.factory.createBlock(thenResult.statements, true);
+
+    const elseBlock = elseResult && (elseResult.statements.length === 1 && !ts.isBlock(stmt.elseStatement!)
+      ? elseResult.statements[0]
+      : elseResult ? ts.factory.createBlock(elseResult.statements, true) : undefined);
+
+    const hasGoto = thenResult.hasGoto || (elseResult?.hasGoto ?? false);
+    const newIf = ts.factory.createIfStatement(stmt.expression, thenBlock, elseBlock);
+    return { statements: [newIf], hasGoto };
+  }
+
+  if (ts.isForStatement(stmt)) {
+    const bodyResult = ts.isBlock(stmt.statement)
+      ? transformBlockForGoto(stmt.statement, resultVar, endLabel, lastResult)
+      : transformStatementForGoto(stmt.statement, resultVar, endLabel, lastResult);
+    const newBody = bodyResult.statements.length === 1 && !ts.isBlock(stmt.statement)
+      ? bodyResult.statements[0]
+      : ts.factory.createBlock(bodyResult.statements, true);
+    const newFor = ts.factory.createForStatement(stmt.initializer, stmt.condition, stmt.incrementor, newBody);
+    return { statements: [newFor], hasGoto: bodyResult.hasGoto };
+  }
+
+  if (ts.isForOfStatement(stmt)) {
+    const bodyResult = ts.isBlock(stmt.statement)
+      ? transformBlockForGoto(stmt.statement, resultVar, endLabel, lastResult)
+      : transformStatementForGoto(stmt.statement, resultVar, endLabel, lastResult);
+    const newBody = bodyResult.statements.length === 1 && !ts.isBlock(stmt.statement)
+      ? bodyResult.statements[0]
+      : ts.factory.createBlock(bodyResult.statements, true);
+    const newForOf = ts.factory.createForOfStatement(stmt.awaitModifier, stmt.initializer, stmt.expression, newBody);
+    return { statements: [newForOf], hasGoto: bodyResult.hasGoto };
+  }
+
+  if (ts.isWhileStatement(stmt)) {
+    const bodyResult = ts.isBlock(stmt.statement)
+      ? transformBlockForGoto(stmt.statement, resultVar, endLabel, lastResult)
+      : transformStatementForGoto(stmt.statement, resultVar, endLabel, lastResult);
+    const newBody = bodyResult.statements.length === 1 && !ts.isBlock(stmt.statement)
+      ? bodyResult.statements[0]
+      : ts.factory.createBlock(bodyResult.statements, true);
+    const newWhile = ts.factory.createWhileStatement(stmt.expression, newBody);
+    return { statements: [newWhile], hasGoto: bodyResult.hasGoto };
+  }
+
+  if (ts.isBlock(stmt)) {
+    const result = transformBlockForGoto(stmt, resultVar, endLabel, lastResult);
+    return { statements: [ts.factory.createBlock(result.statements, true)], hasGoto: result.hasGoto };
+  }
+
+  // Для остальных операторов – без изменений
+  return { statements: [stmt], hasGoto: false };
+}
+
+function transformBlockForGoto(
+  block: ts.Block,
+  resultVar: ts.Identifier,
+  endLabel: string,
+  lastResult: ts.ReturnStatement | undefined
+): TransformResult {
+  const newStatements: ts.Statement[] = [];
+  let hasGoto = false;
+  for (const stmt of block.statements) {
+    const result = transformStatementForGoto(stmt, resultVar, endLabel, lastResult);
+    newStatements.push(...result.statements);
+    hasGoto = hasGoto || result.hasGoto;
+  }
+  return {
+    statements: newStatements,
+    hasGoto
+  };
+}
+// </editor-fold>
+
+function finishBuildDoBlockForLambdaLuaOlderThan52(resultVar: ts.Identifier, withParams: ts.Block, funcNode: ts.ArrowFunction | ts.FunctionExpression) {
+  const doneFlag = ts.factory.createIdentifier(`____done_${resultVar.text}`);
   const returnGuardTransformer = (ctx: ts.TransformationContext) => {
     const visit = (node: ts.Node): ts.Node => {
       if (ts.isReturnStatement(node)) {
@@ -347,6 +457,134 @@ function buildDoBlockForLambda(
   );
 }
 
+function buildDoBlockForLambda(
+  context: TransformationContext,
+  funcNode: FunctionLikeExpression,
+  callArgs: ts.NodeArray<ts.Expression>,
+  resultVar: ts.Identifier
+): ts.Block {
+  const paramMap = new Map<string, ts.Expression>();
+  let argIdx = 0;
+  for (const p of funcNode.parameters) {
+    if (ts.isIdentifier(p.name) && p.name.text !== "this") {
+      const arg = argIdx < callArgs.length ? callArgs[argIdx] : ts.factory.createNull();
+      paramMap.set(p.name.text, arg);
+      argIdx++;
+    }
+  }
+
+  const paramSubstituter = (ctx: ts.TransformationContext) => {
+    const visit = (node: ts.Node): ts.Node => {
+      if (ts.isIdentifier(node) && paramMap.has(node.text)) {
+        return paramMap.get(node.text)!;
+      }
+      return ts.visitEachChild(node, visit, ctx);
+    };
+    return visit;
+  };
+
+  const withParams = ts.transform(funcNode.body, [paramSubstituter]).transformed[0] as ts.Block;
+
+  const totalReturns = countAllReturns(withParams);
+  const lastStmt = withParams.statements[withParams.statements.length - 1];
+  const isLastStmtIsReturn = ts.isReturnStatement(lastStmt);
+  const isSimpleReturn = totalReturns === 1 && isLastStmtIsReturn;
+
+  if (isSimpleReturn) {
+    const nonReturnStmts = withParams.statements.filter(s => !ts.isReturnStatement(s));
+    const returnExpr = lastStmt.expression ?? ts.factory.createNull();
+    const finalStmts = [
+      ...nonReturnStmts,
+      ts.factory.createExpressionStatement(ts.factory.createAssignment(resultVar, returnExpr))
+    ];
+    return ts.setTextRange(ts.factory.createBlock(finalStmts, true), funcNode.body);
+  }
+
+  const isOlderThan52 =
+    context.luaTarget === LuaTarget.Lua50 ||
+    context.luaTarget === LuaTarget.Lua51 ||
+    context.luaTarget === LuaTarget.Universal;
+
+  if (isOlderThan52) {
+    // Lua 5.0, 5.1 или Universal (без goto/label support)
+    return finishBuildDoBlockForLambdaLuaOlderThan52(resultVar, withParams, funcNode);
+  }
+  // Lua 5.2+ с поддержкой goto/label (5.2, 5.3, 5.4, 5.5, JIT, Luau)
+  const endLabel = context.createTempName("inline_end");
+
+  // Затем заменяем return на присваивание + goto
+  const { statements: withGoto, hasGoto } = transformBlockForGoto(withParams, resultVar, endLabel, isLastStmtIsReturn ? lastStmt : undefined);
+
+  // Добавляем метку в конце
+  let finalStatements = ts.factory.createNodeArray([...withGoto]);
+  if (hasGoto) {
+    finalStatements = ts.factory.createNodeArray([
+      ...finalStatements,
+      createLabelMarker(endLabel)
+    ]);
+  }
+
+  return ts.setTextRange(ts.factory.createBlock(finalStatements, true), funcNode.body);
+}
+
+
+// <editor-fold desc="TSLUA MARKERS">
+function createGotoMarker(label: string): ts.Statement {
+  return ts.factory.createExpressionStatement(
+    ts.factory.createCallExpression(
+      ts.factory.createIdentifier("__TSLUA_goto"),
+      undefined,
+      [ts.factory.createStringLiteral(label)]
+    )
+  );
+}
+
+function createLabelMarker(label: string): ts.Statement {
+  return ts.factory.createExpressionStatement(
+    ts.factory.createCallExpression(
+      ts.factory.createIdentifier("__TSLUA_label"),
+      undefined,
+      [ts.factory.createStringLiteral(label)]
+    )
+  );
+}
+
+function replaceTSLUAMarkers(stmts: lua.Statement[]): lua.Statement[] {
+  const result: lua.Statement[] = [];
+
+  const transformer: luaVisitor.LuaVisitor<lua.Node> = (node) => {
+    if (lua.isExpressionStatement(node)) {
+      const expr = node.expression;
+      if (lua.isCallExpression(expr) && lua.isIdentifier(expr.expression)) {
+        const callee = expr.expression.text;
+        if (
+          callee === "__TSLUA_goto" &&
+          expr.params.length === 2 &&
+          lua.isNilLiteral(expr.params[0]) &&
+          lua.isStringLiteral(expr.params[1])
+        ) {
+          return lua.createGotoStatement(expr.params[1].value);
+        }
+        if (
+          callee === "__TSLUA_label" &&
+          expr.params.length === 2 &&
+          lua.isNilLiteral(expr.params[0]) &&
+          lua.isStringLiteral(expr.params[1])
+        ) {
+          return lua.createLabelStatement(expr.params[1].value);
+        }
+      }
+    }
+  }
+
+  for (const stmt of stmts) {
+    const transformed = luaVisitor.transformNode(stmt, transformer)
+    result.push(transformed);
+  }
+  return result;
+}
+// </editor-fold>
+
 function substituteLambdaCall(
   context: TransformationContext,
   info: InlineLambdaInfo,
@@ -392,6 +630,7 @@ export function prepareInlineBody(
   inlineInfo: InlineFunctionInfo,
   args: ts.NodeArray<ts.Expression>
 ): InlineBodyResult {
+  (context as any as InlineContextExtend).__inlineDepth = ((context as any as InlineContextExtend).__inlineDepth ?? 0) + 1
   try {
     const {body, parameters} = inlineInfo;
 
@@ -442,7 +681,7 @@ export function prepareInlineBody(
     ]).transformed[0] as ts.ConciseBody;
 
     substitutedBody = ts.isBlock(substitutedBody)
-      ? expandBlock(substitutedBody, blockLambdaReplacements)
+      ? expandBlock(context, substitutedBody, blockLambdaReplacements)
       : substitutedBody;
 
     if (substitutedBody) {
@@ -452,6 +691,8 @@ export function prepareInlineBody(
     if (!substitutedBody) {
       return {paramAssignments, bodyStatements: [], returnExpressions: [], hasMultiReturn: false};
     }
+
+    substitutedBody = renameAllLocalVariables(substitutedBody, context)
 
     let bodyStatements: lua.Statement[] = [];
     let returnExpressions: lua.Expression[] = [];
@@ -463,6 +704,7 @@ export function prepareInlineBody(
       bodyStatements = context.transformStatements(
         substitutedBody.statements.filter(s => !ts.isReturnStatement(s))
       );
+      bodyStatements = replaceTSLUAMarkers(bodyStatements)
       const returnStmt = substitutedBody.statements.find(ts.isReturnStatement);
       const returnExpr = returnStmt?.expression;
       if (returnExpr) {
@@ -479,6 +721,8 @@ export function prepareInlineBody(
     return {paramAssignments, bodyStatements, returnExpressions, hasMultiReturn};
   } catch (e) {
     throw new WrappedError(`Inline error, node: ${inlineInfo.node?.name?.text}, args: ${args.map(a => a.getText()).join(', ')}`, { cause: e })
+  } finally {
+    (context as any as InlineContextExtend).__inlineDepth--;
   }
 }
 
@@ -493,6 +737,40 @@ class WrappedError extends Error {
 
     Object.setPrototypeOf(this, WrappedError.prototype);
   }
+}
+
+function renameAllLocalVariables(body: ts.ConciseBody, context: TransformationContext): ts.ConciseBody {
+  const renames = new Map<string, string>(); // старое имя → новое
+
+  const transformer = (ctx: ts.TransformationContext) => {
+    const visit = (node: ts.Node): ts.Node => {
+      // Переименовываем объявления
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
+        const oldName = node.name.text;
+        if (!oldName.startsWith("____")) {
+          const newName = context.createTempName(`${oldName}_inline`);
+          renames.set(oldName, newName);
+          return ts.factory.createVariableDeclaration(
+            ts.factory.createIdentifier(newName),
+            node.exclamationToken,
+            node.type,
+            node.initializer
+          );
+        }
+      }
+      // Заменяем все идентификаторы на новые имена
+      if (ts.isIdentifier(node) && renames.has(node.text)) {
+        return ts.factory.createIdentifier(renames.get(node.text)!);
+      }
+      return ts.visitEachChild(node, visit, ctx);
+    };
+    return visit;
+  };
+
+  const result = ts.transform(body, [transformer]);
+  const renamed = result.transformed[0] as ts.ConciseBody;
+  result.dispose();
+  return renamed;
 }
 
 
@@ -522,7 +800,7 @@ export function embedInlineResult(
     vars: lua.Identifier[];
   },
   isReturnContext?: boolean
-): lua.Expression {
+): lua.Expression | undefined {
   if (isReturnContext && target) {
     // Конфликт контекстов: приоритет у присваивания, а не возврата
     isReturnContext = false;
@@ -600,6 +878,21 @@ export function embedInlineResult(
       }
       context.addPrecedingStatements([stmt]);
       return target.vars[0];
+    }
+  }
+
+  if (!target && !isReturnContext) {
+    const isVoid = returnExprs.length === 0 ||
+      (returnExprs.length === 1 && lua.isNilLiteral(returnExprs[0]));
+
+    if (isVoid) {
+      const stmt = lua.createDoStatement(allStmts)
+      if (context.options.inlineGenerateComment) {
+        stmt.leadingComments = [`Start inline ${funcName}`]
+        stmt.trailingComments = [`End inline ${funcName}`]
+      }
+      context.addPrecedingStatements([stmt]);
+      return lua.createNilLiteral();
     }
   }
 

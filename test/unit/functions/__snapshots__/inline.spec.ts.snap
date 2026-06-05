@@ -17,8 +17,8 @@ function ____exports.test(self)
     do
         local ____lambdaResult_0 = nil
         do
-            local temp = 5 * 2
-            ____lambdaResult_0 = temp + 1
+            local ____temp_inline_1 = 5 * 2
+            ____lambdaResult_0 = ____temp_inline_1 + 1
         end
         r1 = ____lambdaResult_0
     end
@@ -47,7 +47,9 @@ local function choose(self, cond, onTrue, onFalse)
     return ____cond_0
 end
 function ____exports.test(self)
-    return 3 * 2
+    local a = 3 * 2
+    local b = true and 100 or 200
+    return {a, b}
 end
 return ____exports"
 `;
@@ -76,40 +78,111 @@ function ____exports.test(self)
     }
     local evens
     do
-        local result = {}
-        for ____, item in ipairs(data) do
-            if item % 2 == 0 then
-                result[#result + 1] = item
+        local ____result_inline_0 = {}
+        for ____, ____item_inline_1 in ipairs(data) do
+            if ____item_inline_1 % 2 == 0 then
+                result[#result + 1] = ____item_inline_1
             end
         end
-        evens = result
+        evens = ____result_inline_0
     end
     local withBlock
     do
-        local result
-        result = {}
-        for ____, item in ipairs(data) do
-            local ____lambdaResult_0 = nil
+        local ____result_inline_4 = {}
+        for ____, ____item_inline_5 in ipairs(data) do
+            local ____lambdaResult_2 = nil
             do
-                local ____done_____lambdaResult_0 = false
-                if item == 3 then
-                    if not ____done_____lambdaResult_0 then
-                        ____lambdaResult_0 = true
-                        ____done_____lambdaResult_0 = true
-                    end
+                if ____item_inline_5 == 3 then
+                    ____lambdaResult_2 = true
+                    goto ____inline_end_3
                 end
+                ____lambdaResult_2 = ____item_inline_5 > 4
+                ::____inline_end_3::
+            end
+            if ____lambdaResult_2 then
+                result[#result + 1] = ____item_inline_5
+            end
+        end
+        withBlock = ____result_inline_4
+    end
+    return {evens, withBlock}
+end
+return ____exports"
+`;
+
+exports[`@inline multi returns in lambda 1`] = `
+"local ____exports = {}
+---
+-- @inline
+local function apply(self, value, block)
+    return block(value)
+end
+function ____exports.test(self)
+    local random = math.random()
+    local a
+    do
+        local ____lambdaResult_0 = nil
+        do
+            if random == 10 then
+                ____lambdaResult_0 = "ten"
+                goto ____inline_end_1
+            end
+            if random < 0 then
+                ____lambdaResult_0 = "down zero"
+                goto ____inline_end_1
+            end
+            if random > 10 then
+                ____lambdaResult_0 = "up ten"
+                goto ____inline_end_1
+            end
+            ____lambdaResult_0 = "down ten"
+            ::____inline_end_1::
+        end
+        a = ____lambdaResult_0
+    end
+end
+return ____exports"
+`;
+
+exports[`@inline multi returns in lambda lua 5.1 1`] = `
+"local ____exports = {}
+---
+-- @inline
+local function apply(self, value, block)
+    return block(value)
+end
+function ____exports.test(self)
+    local random = math.random()
+    local a
+    do
+        local ____lambdaResult_0 = nil
+        do
+            local ____done_____lambdaResult_0 = false
+            if random == 10 then
                 if not ____done_____lambdaResult_0 then
-                    ____lambdaResult_0 = item > 4
+                    ____lambdaResult_0 = "ten"
                     ____done_____lambdaResult_0 = true
                 end
             end
-            if ____lambdaResult_0 then
-                result[#result + 1] = item
+            if random < 0 then
+                if not ____done_____lambdaResult_0 then
+                    ____lambdaResult_0 = "down zero"
+                    ____done_____lambdaResult_0 = true
+                end
+            end
+            if random > 10 then
+                if not ____done_____lambdaResult_0 then
+                    ____lambdaResult_0 = "up ten"
+                    ____done_____lambdaResult_0 = true
+                end
+            end
+            if not ____done_____lambdaResult_0 then
+                ____lambdaResult_0 = "down ten"
+                ____done_____lambdaResult_0 = true
             end
         end
-        withBlock = result
+        a = ____lambdaResult_0
     end
-    return {evens, withBlock}
 end
 return ____exports"
 `;
@@ -126,14 +199,12 @@ end
 function ____exports.test(self)
     local sum = 0
     do
-        for ____, item in ipairs({1, 2, 3}) do
+        for ____, ____item_inline_2 in ipairs({1, 2, 3}) do
             local ____lambdaResult_0 = nil
             do
-                local ____done_____lambdaResult_0 = false
-                sum = sum + item
+                sum = sum + ____item_inline_2
             end
         end
-        local ____inline_result_1
     end
     return sum
 end

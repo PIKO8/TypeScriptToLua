@@ -44,6 +44,8 @@ export interface TypeScriptToLuaOptions {
     plugins?: Array<ts.PluginImport | TransformerImport>;
     sourceMapTraceback?: boolean;
     tstlVerbose?: boolean;
+    inlineGenerateComment?: boolean;
+    inlineRemoveDefault?: boolean;
     lua51AllowTryCatchInAsyncAwait?: boolean;
     measurePerformance?: boolean;
 }

@@ -1,4 +1,5 @@
 import * as util from "../../util";
+import {LuaTarget} from "../../../src";
 
 test("@inline simple scalars and expression lambdas", () => {
     util.testModule`
@@ -90,3 +91,39 @@ test("@inline side effects and closure", () => {
         }
     `.expectLuaToMatchSnapshot();
 });
+
+test("@inline multi returns in lambda", () => {
+    util.testModule`
+        /** @inline */
+        function apply<T, R>(value: T, block: (this: void, value: T) => R): R { return block(value) }
+        
+        export function test() {
+            const random = Math.random()
+            const a = apply(random, (value) => {
+                if (value === 10) return "ten"
+                if (value < 0) return "down zero"
+                if (value > 10) return "up ten"
+                return "down ten"
+            })
+        }  
+    `.expectLuaToMatchSnapshot()
+})
+
+test("@inline multi returns in lambda lua 5.1", () => {
+    util.testModule`
+        /** @inline */
+        function apply<T, R>(value: T, block: (this: void, value: T) => R): R { return block(value) }
+        
+        export function test() {
+            const random = Math.random()
+            const a = apply(random, (value) => {
+                if (value === 10) return "ten"
+                if (value < 0) return "down zero"
+                if (value > 10) return "up ten"
+                return "down ten"
+            })
+        }  
+    `
+      .setOptions({ luaTarget: LuaTarget.Lua51 })
+      .expectLuaToMatchSnapshot()
+})

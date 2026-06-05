@@ -177,12 +177,6 @@ export const unsupportedArrayWithLengthConstructor = createErrorDiagnosticFactor
     `Constructing new Array with length is not supported.`
 );
 
-export const inlineRecursiveCall = createErrorDiagnosticFactory("Inline functions cannot call themselves recursively.");
-
-export const inlineNestedInlineCall = createErrorDiagnosticFactory(
-    "Inline functions cannot call other inline functions."
-);
-
 export const inlineMethodNotSupported = createErrorDiagnosticFactory(
     "Inline annotation is not supported on class methods and accessors."
 );

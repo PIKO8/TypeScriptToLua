@@ -16,7 +16,7 @@ import { getOptionalContinuationData, transformOptionalChain } from "./optional-
 import { transformImportExpression } from "./modules/import";
 import { transformLanguageExtensionCallExpression } from "./language-extensions/call-extension";
 import { getCustomNameFromSymbol } from "./identifier";
-import {embedInlineResult, prepareInlineBody} from "../utils/inline";
+import {embedInlineResult, InlineContextExtend, prepareInlineBody} from "../utils/inline";
 
 export function validateArguments(
     context: TransformationContext,
@@ -370,7 +370,11 @@ function tryTransformInlineCall(
     const result = prepareInlineBody(context, inlineInfo, node.arguments);
 
     const callCtx = getCallContext(node);
-    console.log(`Inline function ${symbol.name} called, Result = {hasMultiReturn=${result.hasMultiReturn},returnExpressions=${result.returnExpressions.length},paramAssignments=${result.paramAssignments.length},hasMultiReturn=${result.hasMultiReturn},target=${callCtx.kind},isReturn=${callCtx.kind==='return'}}`)
+
+    const isNested = (context as any as InlineContextExtend).__inlineDepth > 0
+    const isResultContext = !isNested && callCtx.kind === 'return'
+
+    // console.log(`Inline function ${symbol.name} called, Result = {hasMultiReturn=${result.hasMultiReturn},returnExpressions=${result.returnExpressions.length},paramAssignments=${result.paramAssignments.length},hasMultiReturn=${result.hasMultiReturn},target=${callCtx.kind},isReturn=${callCtx.kind==='return'}}`)
     let target: { kind: 'variables'; vars: lua.Identifier[] } | undefined;
     if (callCtx.kind === 'variable-declaration') {
         target = { kind: 'variables', vars: [lua.createIdentifier(callCtx.variableName!)] };
@@ -385,7 +389,7 @@ function tryTransformInlineCall(
       result.returnExpressions,
       result.hasMultiReturn,
       target,
-      callCtx.kind === 'return'
+      isResultContext
     );
 }
 

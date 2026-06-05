@@ -11,6 +11,7 @@ import {
 import { standardVisitors } from "./visitors";
 import { usingTransformer } from "./pre-transformers/using-transformer";
 import { AnnotationKind, getSymbolAnnotations } from "./utils/annotations";
+import {parseInlineAnnotationArgs} from "./utils/inline";
 
 // Track which programs have been scanned for inline functions
 const scannedPrograms = new WeakSet<ts.Program>();
@@ -51,13 +52,18 @@ function collectInlineFunctionsFromSourceFile(program: ts.Program, sourceFile: t
             const symbol = checker.getSymbolAtLocation(node.name);
             if (symbol) {
                 const annotations = getSymbolAnnotations(symbol);
-                if (annotations.has(AnnotationKind.Inline)) {
-                    console.log("Inline function:", symbol.name)
+                const inlineAnnotation = annotations.get(AnnotationKind.Inline);
+                if (inlineAnnotation) {
+
+                    const { removeDeclaration } =
+                      parseInlineAnnotationArgs(program.getCompilerOptions(), inlineAnnotation);
+
                     inlineFunctions.set(symbol, {
                         node,
                         parameters: node.parameters,
                         body: node.body,
                         sourceFile,
+                        removeDeclaration
                     });
                 }
             }
@@ -74,12 +80,18 @@ function collectInlineFunctionsFromSourceFile(program: ts.Program, sourceFile: t
                     const symbol = checker.getSymbolAtLocation(declaration.name);
                     if (symbol) {
                         const annotations = getSymbolAnnotations(symbol);
-                        if (annotations.has(AnnotationKind.Inline) && declaration.initializer.body) {
+                        const inlineAnnotation = annotations.get(AnnotationKind.Inline);
+                        if (inlineAnnotation && declaration.initializer.body) {
+
+                            const { removeDeclaration } =
+                              parseInlineAnnotationArgs(program.getCompilerOptions(), inlineAnnotation);
+
                             inlineFunctions.set(symbol, {
                                 node: declaration.initializer,
                                 parameters: declaration.initializer.parameters,
                                 body: declaration.initializer.body,
                                 sourceFile,
+                                removeDeclaration
                             });
                         }
                     }

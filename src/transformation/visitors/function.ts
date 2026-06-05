@@ -22,10 +22,9 @@ import { transformExpressionBodyToReturnStatement } from "./return";
 import { transformBindingPattern } from "./variable-declaration";
 import {
     inlineMethodNotSupported,
-    inlineNestedInlineCall,
-    inlineRecursiveCall,
 } from "../utils/diagnostics";
-import { isInlineFunctionCandidate } from "../utils/inline";
+import {isInlineFunctionCandidate, parseInlineAnnotationArgs} from "../utils/inline";
+import {AnnotationKind, getSymbolAnnotations} from "../utils/annotations";
 
 function transformParameterDefaultValueDeclaration(
     context: TransformationContext,
@@ -119,40 +118,6 @@ export function isFunctionTypeWithProperties(context: TransformationContext, fun
 //     return true;
 // }
 
-function checkInlineFunctionCalls(
-    context: TransformationContext,
-    node: ts.Node,
-    currentFunctionSymbol: ts.Symbol
-): void {
-    // Recursively check all call expressions in the function body
-    function visit(child: ts.Node): void {
-        if (ts.isCallExpression(child)) {
-            const signature = context.checker.getResolvedSignature(child);
-            if (signature?.declaration) {
-                const calledSymbol = context.checker.getSymbolAtLocation(child.expression);
-                if (calledSymbol) {
-                    // Check if calling itself (recursive)
-                    if (calledSymbol === currentFunctionSymbol) {
-                        context.diagnostics.push(inlineRecursiveCall(child));
-                        return;
-                    }
-
-                    // Check if calling another inline function
-                    const inlineInfo = context.inlineFunctions.get(calledSymbol);
-                    if (inlineInfo) {
-                        context.diagnostics.push(inlineNestedInlineCall(child));
-                        return;
-                    }
-                }
-            }
-        }
-
-        ts.forEachChild(child, visit);
-    }
-
-    visit(node);
-}
-
 function registerInlineFunction(
     context: TransformationContext,
     node: ts.FunctionDeclaration | ts.FunctionExpression
@@ -161,6 +126,9 @@ function registerInlineFunction(
 
     const symbol = context.checker.getSymbolAtLocation(node.name);
     if (!symbol) return false;
+
+    const annotations = getSymbolAnnotations(symbol);
+    const inlineAnnotation = annotations.get(AnnotationKind.Inline);
 
     // Validate that it's not a method or accessor
     if (ts.isMethodDeclaration(node) || ts.isAccessor(node)) {
@@ -174,10 +142,8 @@ function registerInlineFunction(
     //     return false;
     // }
 
-    // Check for recursive calls and calls to other inline functions
-    if (node.body) {
-        checkInlineFunctionCalls(context, node.body, symbol);
-    }
+    const { removeDeclaration } =
+      parseInlineAnnotationArgs(context.options, inlineAnnotation);
 
     // Register the inline function
     context.inlineFunctions.set(symbol, {
@@ -185,6 +151,7 @@ function registerInlineFunction(
         parameters: node.parameters,
         body: node.body!,
         sourceFile: node.getSourceFile(),
+        removeDeclaration
     });
 
     return true;
@@ -438,8 +405,15 @@ export const transformFunctionDeclaration: FunctionVisitor<ts.FunctionDeclaratio
         if (context.options.tstlVerbose && registered) {
             console.log(`[INLINE] Registered inline function: ${(node.name as ts.Identifier).text}`);
         }
-        // Inline functions don't generate Lua code
-        // return undefined; // There is no better way to generate for unforeseen circumstances
+
+        // Check if the inline function should be removed from output
+        const symbol = context.checker.getSymbolAtLocation(node.name!);
+        if (symbol) {
+            const inlineInfo = context.inlineFunctions.get(symbol);
+            if (inlineInfo?.removeDeclaration) {
+                return undefined;
+            }
+        }
     }
 
     if (hasDefaultExportModifier(node)) {

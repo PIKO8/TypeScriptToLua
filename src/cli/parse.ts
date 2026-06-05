@@ -91,7 +91,12 @@ export const optionDeclarations: CommandLineOption[] = [
     },
     {
         name: "inlineGenerateComment",
-        description: "Adds a comment to inline areas after inline functions",
+        description: "Adds a comment to inline areas after inline functions.",
+        type: "boolean",
+    },
+    {
+        name: "inlineRemoveDefault",
+        description: "Defines the default value for deleting the main body of an inline function.",
         type: "boolean",
     },
     {
