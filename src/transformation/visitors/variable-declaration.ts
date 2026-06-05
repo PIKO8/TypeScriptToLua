@@ -10,10 +10,10 @@ import { LuaLibFeature, transformLuaLibFunction } from "../utils/lualib";
 import { transformInPrecedingStatementScope } from "../utils/preceding-statements";
 import { createCallableTable, isFunctionTypeWithProperties } from "./function";
 import { transformIdentifier } from "./identifier";
-import {isMultiReturnCall} from "./language-extensions/multi";
+import { isMultiReturnCall } from "./language-extensions/multi";
 import { transformPropertyName } from "./literal";
 import { moveToPrecedingTemp, transformExpressionList } from "./expression-list";
-import {createInlineAssignment, prepareInlineBody} from "../utils/inline";
+import { createInlineAssignment, prepareInlineBody } from "../utils/inline";
 
 // Helper to check if an expression is an inline function call
 function isInlineFunctionCall(context: TransformationContext, expression: ts.Expression): boolean {
@@ -366,16 +366,17 @@ function transformInlineFunctionVariableDeclaration(
     // Объявляем переменную
     const localDecl = lua.createVariableDeclarationStatement(variableName);
     if (context.options.inlineGenerateComment) {
-        localDecl.leadingComments = [`Start inline ${symbol.name}`]
+        localDecl.leadingComments = [`Start inline ${symbol.name}`];
     }
 
     // do...end с присваиванием
     const doBlock = createInlineAssignment(
-      context, symbol.name,
-      [...result.paramAssignments, ...result.bodyStatements],
-      result.returnExpressions,
-      result.hasMultiReturn,
-      [variableName]
+        context,
+        symbol.name,
+        [...result.paramAssignments, ...result.bodyStatements],
+        result.returnExpressions,
+        result.hasMultiReturn,
+        [variableName]
     );
 
     return [localDecl, doBlock];
@@ -423,20 +424,20 @@ function transformInlineFunctionDestructuringDeclaration(
     // local a, b
     const localDecl = lua.createVariableDeclarationStatement(variableNames);
     if (context.options.inlineGenerateComment) {
-        localDecl.leadingComments = [`Start inline ${symbol.name}`]
+        localDecl.leadingComments = [`Start inline ${symbol.name}`];
     }
 
     const doBlock = createInlineAssignment(
-      context, symbol.name,
-      [...result.paramAssignments, ...result.bodyStatements],
-      result.returnExpressions,
-      result.hasMultiReturn,
-      variableNames
+        context,
+        symbol.name,
+        [...result.paramAssignments, ...result.bodyStatements],
+        result.returnExpressions,
+        result.hasMultiReturn,
+        variableNames
     );
 
     return [localDecl, doBlock];
 }
-
 
 function getCalledExpression(node: ts.CallExpression): ts.Expression {
     let expr: ts.Expression = node.expression;

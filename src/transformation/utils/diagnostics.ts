@@ -181,6 +181,4 @@ export const inlineMethodNotSupported = createErrorDiagnosticFactory(
     "Inline annotation is not supported on class methods and accessors."
 );
 
-export const internalUnknownError = createErrorDiagnosticFactory(
-  "Internal error something went wrong."
-);
+export const internalUnknownError = createErrorDiagnosticFactory("Internal error something went wrong.");

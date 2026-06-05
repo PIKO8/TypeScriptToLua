@@ -24,57 +24,64 @@
 The main goal of this fork is to bring **Kotlin-style zero-overhead `@inline` functions** to TypeScriptToLua. Unlike experimental community plugins, this feature is baked directly into the compiler engine, supporting deep cross-file analysis and complex control flows.
 
 ### 1. Cross-File Macro Inlining
-* Functions marked with JSDoc `/** @inline */` are completely unwrapped into the calling expression/statement.
-* Works seamlessly across different files and modules via strict TS Symbol aliasing resolution.
+
+- Functions marked with JSDoc `/** @inline */` are completely unwrapped into the calling expression/statement.
+- Works seamlessly across different files and modules via strict TS Symbol aliasing resolution.
 
 ### 2. High-Order Functions & Lambda Optimization
-* Fully supports inlining functions that accept other functions (lambdas/callbacks) as arguments (e.g., custom `filter`, `map`, `forEach`).
-* Arrow functions and inline expressions are embedded into loops and conditions without creating closures or allocating anonymous tables in Lua.
+
+- Fully supports inlining functions that accept other functions (lambdas/callbacks) as arguments (e.g., custom `filter`, `map`, `forEach`).
+- Arrow functions and inline expressions are embedded into loops and conditions without creating closures or allocating anonymous tables in Lua.
 
 ### 3. Adaptive Control Flow (Target-Specific Compilation)
-* **Lua 5.2+, JIT, Luau**: Translates deep `return` statements in complex multi-return lambdas into high-performance native `goto` jumps with macro hygiene (guaranteed unique labels).
-* **Lua 5.1 / Universal**: Automatically downgrades complex control flow into efficient state-machine blocks using temporary execution flags (`____done_...`), ensuring 100% runtime compatibility.
+
+- **Lua 5.2+, JIT, Luau**: Translates deep `return` statements in complex multi-return lambdas into high-performance native `goto` jumps with macro hygiene (guaranteed unique labels).
+- **Lua 5.1 / Universal**: Automatically downgrades complex control flow into efficient state-machine blocks using temporary execution flags (`____done_...`), ensuring 100% runtime compatibility.
 
 ### 4. Zero-Overhead Fast Path & `$multi` Integration
-* Triivial functions (single trailing return expressions) skip block overhead and flatten directly into equations or native multiple assignments.
-* Perfect cooperation with `LuaMultiReturn` / `$multi` compiler macro.
+
+- Triivial functions (single trailing return expressions) skip block overhead and flatten directly into equations or native multiple assignments.
+- Perfect cooperation with `LuaMultiReturn` / `$multi` compiler macro.
 
 ### 5. New CLI / tsconfig.json compiler options
-* `inlineGenerateComment`: (boolean) Generates `-- Start inline [name]` annotations directly in the emitted Lua files to simplify debugging.
-* `inlineRemoveDefault`: (boolean) Globally toggles whether to strip the original inline function declarations from the compiled output. Can be overridden per function via `/** @inline toggle */`.
+
+- `inlineGenerateComment`: (boolean) Generates `-- Start inline [name]` annotations directly in the emitted Lua files to simplify debugging.
+- `inlineRemoveDefault`: (boolean) Globally toggles whether to strip the original inline function declarations from the compiled output. Can be overridden per function via `/** @inline toggle */`.
 
 ---
 
 ## 🛠️ Quick Example
 
 ### TypeScript Source Code
+
 ```typescript
 /** @inline */
 function filter<T>(arr: T[], pred: (x: T) => boolean): T[] {
-    const result: T[] = [];
-    for (const item of arr) {
-        if (pred(item)) result.push(item);
-    }
-    return result;
+  const result: T[] = [];
+  for (const item of arr) {
+    if (pred(item)) result.push(item);
+  }
+  return result;
 }
 
 export function test() {
-    const data = [1, 2, 3, 4, 5, 6];
-    
-    // Inlining simple conditions
-    const evens = filter(data, (n) => n % 2 == 0);
-    
-    // Inlining heavy block expressions with early returns
-    const withBlock = filter(data, (n) => {
-        if (n == 3) return true;
-        return n > 4;
-    });
-    
-    return [evens, withBlock];
+  const data = [1, 2, 3, 4, 5, 6];
+
+  // Inlining simple conditions
+  const evens = filter(data, n => n % 2 == 0);
+
+  // Inlining heavy block expressions with early returns
+  const withBlock = filter(data, n => {
+    if (n == 3) return true;
+    return n > 4;
+  });
+
+  return [evens, withBlock];
 }
 ```
 
 ### Transpiled Zero-Overhead Lua Output (Lua 5.2+)
+
 ```lua
 function ____exports.test(self)
     local data = {1, 2, 3, 4, 5, 6}
@@ -110,7 +117,9 @@ function ____exports.test(self)
     return {evens, withBlock}
 end
 ```
+
 > 💡 **Note on Variable Naming:** To make this example easy to read, some variable names have been manually cleaned up. In actual generated Lua code, the compiler enforces strict **macro hygiene** by automatically renaming local variables and arguments inside inline blocks (e.g., transforming `item` into `____item_inline_1`). This ensures complete scope isolation and completely prevents name collision bugs with the surrounding code!
+
 ---
 
 ## ⚠️ Known Limitations & AI Disclaimer
@@ -118,17 +127,19 @@ end
 This inliner was developed as a powerful custom extension of the compiler. While it passes all core integration tests, please keep the following trade-offs and architectural quirks in mind:
 
 ### 1. Short-circuit Evaluation Side-Effects
-* **The Issue:** If you use inline functions inside logical conditions (e.g., `if (isValid() && fetchProps())`), the compiler hoists evaluation do-blocks *before* executing the `if` statement itself.
-* **The Result:** Both inline functions will **always** be executed, even if the first one returns `false`. This can cause unexpected side-effects. It is highly recommended to store inline function results in local variables manually before using them in complex conditional logic.
+
+- **The Issue:** If you use inline functions inside logical conditions (e.g., `if (isValid() && fetchProps())`), the compiler hoists evaluation do-blocks _before_ executing the `if` statement itself.
+- **The Result:** Both inline functions will **always** be executed, even if the first one returns `false`. This can cause unexpected side-effects. It is highly recommended to store inline function results in local variables manually before using them in complex conditional logic.
 
 ### 2. Emitted Code Debugging (Source Maps)
-* Deeply nested inlining of complex statements—especially with state-machine generation for older Lua 5.1 targets—can complicate accurate runtime line debugging.
-* To make code tracking easier during development, always enable the `--inlineGenerateComment true` flag.
+
+- Deeply nested inlining of complex statements—especially with state-machine generation for older Lua 5.1 targets—can complicate accurate runtime line debugging.
+- To make code tracking easier during development, always enable the `--inlineGenerateComment true` flag.
 
 ### 3. 🤖 AI-Assisted Development Notice
-* About **70% of this compiler fork's logic was built in collaboration with AI (Qwen)** directly inside the IDE.
-* Because of this AI-driven approach, some edge cases might still be unhandled, and deep internal refactoring can be highly complex. However, it completely fulfills its goal for practical, micro-optimization tasks! "It works on my machine" ™️ — use it with care and feel free to submit PRs for any bugs you find.
 
+- About **70% of this compiler fork's logic was built in collaboration with AI (Qwen)** directly inside the IDE.
+- Because of this AI-driven approach, some edge cases might still be unhandled, and deep internal refactoring can be highly complex. However, it completely fulfills its goal for practical, micro-optimization tasks! "It works on my machine" ™️ — use it with care and feel free to submit PRs for any bugs you find.
 
 # Original README
 

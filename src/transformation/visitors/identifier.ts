@@ -1,18 +1,18 @@
 import * as ts from "typescript";
 import * as lua from "../../LuaAST";
-import {checkForLuaLibType, transformBuiltinIdentifierExpression} from "../builtins";
-import {createPromiseIdentifier, isPromiseClass} from "../builtins/promise";
-import {FunctionVisitor, tempSymbolId, TransformationContext} from "../context";
-import {invalidCallExtensionUse} from "../utils/diagnostics";
-import {createExportedIdentifier, getSymbolExportScope} from "../utils/export";
-import {createSafeName, hasUnsafeIdentifierName} from "../utils/safe-names";
-import {getIdentifierSymbolId} from "../utils/symbols";
-import {getOptionalContinuationData, isOptionalContinuation} from "./optional-chaining";
-import {isStandardLibraryType} from "../utils/typescript";
-import {getExtensionKindForNode, getExtensionKindForSymbol} from "../utils/language-extensions";
-import {callExtensions} from "./language-extensions/call-extension";
-import {isIdentifierExtensionValue, reportInvalidExtensionValue} from "./language-extensions/identifier";
-import {Annotation, AnnotationKind, getNodeAnnotations} from "../utils/annotations";
+import { checkForLuaLibType, transformBuiltinIdentifierExpression } from "../builtins";
+import { createPromiseIdentifier, isPromiseClass } from "../builtins/promise";
+import { FunctionVisitor, tempSymbolId, TransformationContext } from "../context";
+import { invalidCallExtensionUse } from "../utils/diagnostics";
+import { createExportedIdentifier, getSymbolExportScope } from "../utils/export";
+import { createSafeName, hasUnsafeIdentifierName } from "../utils/safe-names";
+import { getIdentifierSymbolId } from "../utils/symbols";
+import { getOptionalContinuationData, isOptionalContinuation } from "./optional-chaining";
+import { isStandardLibraryType } from "../utils/typescript";
+import { getExtensionKindForNode, getExtensionKindForSymbol } from "../utils/language-extensions";
+import { callExtensions } from "./language-extensions/call-extension";
+import { isIdentifierExtensionValue, reportInvalidExtensionValue } from "./language-extensions/identifier";
+import { Annotation, AnnotationKind, getNodeAnnotations } from "../utils/annotations";
 
 export function transformIdentifier(context: TransformationContext, identifier: ts.Identifier): lua.Identifier {
     return transformNonValueIdentifier(context, identifier, context.checker.getSymbolAtLocation(identifier));

@@ -20,11 +20,9 @@ import { isAsyncFunction, wrapInAsyncAwaiter } from "./async-await";
 import { transformIdentifier } from "./identifier";
 import { transformExpressionBodyToReturnStatement } from "./return";
 import { transformBindingPattern } from "./variable-declaration";
-import {
-    inlineMethodNotSupported,
-} from "../utils/diagnostics";
-import {isInlineFunctionCandidate, parseInlineAnnotationArgs} from "../utils/inline";
-import {AnnotationKind, getSymbolAnnotations} from "../utils/annotations";
+import { inlineMethodNotSupported } from "../utils/diagnostics";
+import { isInlineFunctionCandidate, parseInlineAnnotationArgs } from "../utils/inline";
+import { AnnotationKind, getSymbolAnnotations } from "../utils/annotations";
 
 function transformParameterDefaultValueDeclaration(
     context: TransformationContext,
@@ -142,8 +140,7 @@ function registerInlineFunction(
     //     return false;
     // }
 
-    const { removeDeclaration } =
-      parseInlineAnnotationArgs(context.options, inlineAnnotation);
+    const { removeDeclaration } = parseInlineAnnotationArgs(context.options, inlineAnnotation);
 
     // Register the inline function
     context.inlineFunctions.set(symbol, {
@@ -151,7 +148,7 @@ function registerInlineFunction(
         parameters: node.parameters,
         body: node.body!,
         sourceFile: node.getSourceFile(),
-        removeDeclaration
+        removeDeclaration,
     });
 
     return true;

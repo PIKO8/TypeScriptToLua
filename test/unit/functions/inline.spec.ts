@@ -1,5 +1,5 @@
 import * as util from "../../util";
-import {LuaTarget} from "../../../src";
+import { LuaTarget } from "../../../src";
 
 test("@inline simple scalars and expression lambdas", () => {
     util.testModule`
@@ -33,8 +33,8 @@ test("@inline block lambda and destructuring", () => {
             return [r1, num, str];
         }
     `
-      .withLanguageExtensions()
-      .expectLuaToMatchSnapshot();
+        .withLanguageExtensions()
+        .expectLuaToMatchSnapshot();
 });
 
 test("@inline in for and if", () => {
@@ -106,8 +106,8 @@ test("@inline multi returns in lambda", () => {
                 return "down ten"
             })
         }  
-    `.expectLuaToMatchSnapshot()
-})
+    `.expectLuaToMatchSnapshot();
+});
 
 test("@inline multi returns in lambda lua 5.1", () => {
     util.testModule`
@@ -124,6 +124,6 @@ test("@inline multi returns in lambda lua 5.1", () => {
             })
         }  
     `
-      .setOptions({ luaTarget: LuaTarget.Lua51 })
-      .expectLuaToMatchSnapshot()
-})
+        .setOptions({ luaTarget: LuaTarget.Lua51 })
+        .expectLuaToMatchSnapshot();
+});

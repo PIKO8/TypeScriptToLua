@@ -14,9 +14,9 @@ export type LuaVisitorResult<T extends lua.Node> = T | T[] | undefined;
 /**
  * Walks through all nodes in the Lua AST using depth-first traversal
  * Calls the visitor function for each node encountered
- * 
+ *
  * Stops at the first non-undefined result returned by the visitor
- * 
+ *
  * @example
  * // Find the first identifier in an AST
  * const firstId = visitNode(file, (node) => {
@@ -24,7 +24,7 @@ export type LuaVisitorResult<T extends lua.Node> = T | T[] | undefined;
  *         return node;
  *     }
  * });
- * 
+ *
  * @example
  * // Check if AST contains a specific pattern
  * const hasFunctionCall = visitNode(file, (node) => {
@@ -286,7 +286,7 @@ export function visitNode<T>(node: lua.Node, visitor: LuaVisitor<T>): T | undefi
 /**
  * Walks through ALL nodes in the Lua AST (not stopping at first result)
  * Useful for collecting information or performing side effects
- * 
+ *
  * @example
  * // Count all function calls in the AST
  * let callCount = 0;
@@ -296,7 +296,7 @@ export function visitNode<T>(node: lua.Node, visitor: LuaVisitor<T>): T | undefi
  *     }
  * });
  * console.log(`Found ${callCount} function calls`);
- * 
+ *
  * @example
  * // Collect all identifiers
  * const identifiers: lua.Identifier[] = [];
@@ -305,7 +305,7 @@ export function visitNode<T>(node: lua.Node, visitor: LuaVisitor<T>): T | undefi
  *         identifiers.push(node);
  *     }
  * });
- * 
+ *
  * @example
  * // Validate AST - check for invalid patterns
  * visitAllNodes(file, (node) => {
@@ -432,43 +432,40 @@ export function visitAllNodes(node: lua.Node, visitor: LuaVisitor): void {
 
 /**
  * Collects all nodes of a specific kind from the AST
- * 
+ *
  * @example
  * // Get all identifiers in the file
  * const identifiers = collectNodes(file, lua.SyntaxKind.Identifier);
- * 
+ *
  * @example
  * // Get all function calls
  * const calls = collectNodes(file, lua.SyntaxKind.CallExpression);
- * 
+ *
  * @example
  * // Get all string literals
  * const strings = collectNodes(file, lua.SyntaxKind.StringLiteral);
  * console.log(strings.map(s => s.value));
  */
-export function collectNodes<K extends lua.SyntaxKind>(
-    node: lua.Node,
-    kind: K
-): Array<Extract<lua.Node, { kind: K }>> {
+export function collectNodes<K extends lua.SyntaxKind>(node: lua.Node, kind: K): Array<Extract<lua.Node, { kind: K }>> {
     const results: Array<Extract<lua.Node, { kind: K }>> = [];
-    
-    visitAllNodes(node, (n) => {
+
+    visitAllNodes(node, n => {
         if (n.kind === kind) {
             results.push(n as Extract<lua.Node, { kind: K }>);
         }
     });
-    
+
     return results;
 }
 
 /**
  * Transforms nodes in the AST by replacing them with visitor results
  * Returns a new AST with transformations applied (immutable - original is not modified)
- * 
+ *
  * The transformer function should return:
  * - A new node to replace the current one
  * - undefined to keep the current node and continue transforming children
- * 
+ *
  * @example
  * // Replace all identifiers named "oldName" with "newName"
  * const newFile = transformNode(file, (node) => {
@@ -476,7 +473,7 @@ export function collectNodes<K extends lua.SyntaxKind>(
  *         return lua.createIdentifier("newName");
  *     }
  * });
- * 
+ *
  * @example
  * // Wrap all numeric literals in parentheses
  * const wrappedFile = transformNode(file, (node) => {
@@ -484,7 +481,7 @@ export function collectNodes<K extends lua.SyntaxKind>(
  *         return lua.createParenthesizedExpression(node);
  *     }
  * });
- * 
+ *
  * @example
  * // Convert all addition operations to multiplication
  * const transformed = transformNode(file, (node) => {
@@ -492,7 +489,7 @@ export function collectNodes<K extends lua.SyntaxKind>(
  *         return lua.createBinaryExpression(node.left, node.right, lua.SyntaxKind.MultiplicationOperator);
  *     }
  * });
- * 
+ *
  * @example
  * // Add logging to all function calls
  * const loggedFile = transformNode(file, (node) => {
@@ -530,17 +527,13 @@ export function transformNode<T extends lua.Node>(node: T, transformer: LuaVisit
         const newRight = node.right?.map(expr => transformNode(expr, transformer));
         return lua.createVariableDeclarationStatement(newLeft, newRight) as any as T;
     } else if (lua.isAssignmentStatement(node)) {
-        const newLeft = node.left.map(
-            expr => transformNode(expr, transformer)
-        );
+        const newLeft = node.left.map(expr => transformNode(expr, transformer));
         const newRight = node.right.map(expr => transformNode(expr, transformer));
         return lua.createAssignmentStatement(newLeft, newRight) as any as T;
     } else if (lua.isIfStatement(node)) {
         const newCondition = transformNode(node.condition, transformer);
         const newIfBlock = transformNode(node.ifBlock, transformer);
-        const newElseBlock = node.elseBlock
-            ? transformNode(node.elseBlock, transformer)
-            : undefined;
+        const newElseBlock = node.elseBlock ? transformNode(node.elseBlock, transformer) : undefined;
         return lua.createIfStatement(newCondition, newIfBlock, newElseBlock) as any as T;
     } else if (lua.isWhileStatement(node)) {
         const newCondition = transformNode(node.condition, transformer);
@@ -552,51 +545,32 @@ export function transformNode<T extends lua.Node>(node: T, transformer: LuaVisit
         return lua.createRepeatStatement(newBody, newCondition) as any as T;
     } else if (lua.isForStatement(node)) {
         const newControlVar = transformNode(node.controlVariable, transformer);
-        const newInitializer = transformNode(
-            node.controlVariableInitializer,
-            transformer
-        );
+        const newInitializer = transformNode(node.controlVariableInitializer, transformer);
         const newLimit = transformNode(node.limitExpression, transformer);
-        const newStep = node.stepExpression
-            ? (transformNode(node.stepExpression, transformer))
-            : undefined;
+        const newStep = node.stepExpression ? transformNode(node.stepExpression, transformer) : undefined;
         const newBody = transformNode(node.body, transformer);
-        return lua.createForStatement(
-            newBody,
-            newControlVar,
-            newInitializer,
-            newLimit,
-            newStep
-        ) as any as T;
+        return lua.createForStatement(newBody, newControlVar, newInitializer, newLimit, newStep) as any as T;
     } else if (lua.isForInStatement(node)) {
         const newNames = node.names.map(name => transformNode(name, transformer));
-        const newExpressions = node.expressions.map(expr =>
-            transformNode(expr, transformer)
-        );
+        const newExpressions = node.expressions.map(expr => transformNode(expr, transformer));
         const newBody = transformNode(node.body, transformer);
         return lua.createForInStatement(newBody, newNames, newExpressions) as any as T;
     } else if (lua.isReturnStatement(node)) {
-        const newExpressions = node.expressions.map(expr =>
-            transformNode(expr, transformer)
-        );
+        const newExpressions = node.expressions.map(expr => transformNode(expr, transformer));
         return lua.createReturnStatement(newExpressions) as any as T;
     } else if (lua.isExpressionStatement(node)) {
         const newExpression = transformNode(node.expression, transformer);
         return lua.createExpressionStatement(newExpression) as any as T;
     } else if (lua.isFunctionExpression(node)) {
         const newParams = node.params?.map(param => transformNode(param, transformer));
-        const newDots = node.dots
-            ? (transformNode(node.dots, transformer))
-            : undefined;
+        const newDots = node.dots ? transformNode(node.dots, transformer) : undefined;
         const newBody = transformNode(node.body, transformer);
         return lua.createFunctionExpression(newBody, newParams, newDots, node.flags) as any as T;
     } else if (lua.isTableExpression(node)) {
-        const newFields = node.fields.map(field =>
-            transformNode(field, transformer)
-        );
+        const newFields = node.fields.map(field => transformNode(field, transformer));
         return lua.createTableExpression(newFields) as any as T;
     } else if (lua.isTableFieldExpression(node)) {
-        const newKey = node.key ? (transformNode(node.key, transformer)) : undefined;
+        const newKey = node.key ? transformNode(node.key, transformer) : undefined;
         const newValue = transformNode(node.value, transformer);
         return lua.createTableFieldExpression(newValue, newKey) as any as T;
     } else if (lua.isUnaryExpression(node)) {
@@ -632,31 +606,30 @@ export function transformNode<T extends lua.Node>(node: T, transformer: LuaVisit
     return node;
 }
 
-
 /**
  * Finds the first node matching a predicate
- * 
+ *
  * @example
  * // Find first function call in the AST
  * const firstCall = findNode(file, (node) => lua.isCallExpression(node));
- * 
+ *
  * @example
  * // Find first identifier with a specific name
- * const myVar = findNode(file, (node) => 
+ * const myVar = findNode(file, (node) =>
  *     lua.isIdentifier(node) && node.text === "myVariable"
  * );
- * 
+ *
  * @example
  * // Find first table expression with more than 5 fields
  * const largeTable = findNode(file, (node) =>
  *     lua.isTableExpression(node) && node.fields.length > 5
  * );
- * 
+ *
  * @example
  * // Find nested pattern: a call expression inside an if statement
  * let foundCall: lua.CallExpression | undefined;
  * let inIfStatement = false;
- * 
+ *
  * findNode(file, (node) => {
  *     if (lua.isIfStatement(node)) {
  *         inIfStatement = true;
@@ -669,14 +642,14 @@ export function transformNode<T extends lua.Node>(node: T, transformer: LuaVisit
  */
 export function findNode(node: lua.Node, predicate: (node: lua.Node) => boolean): lua.Node | undefined {
     let found: lua.Node | undefined;
-    
-    visitNode(node, (n) => {
+
+    visitNode(node, n => {
         if (predicate(n)) {
             found = n;
             return n;
         }
         return undefined;
     });
-    
+
     return found;
 }

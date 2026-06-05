@@ -16,7 +16,7 @@ import { getOptionalContinuationData, transformOptionalChain } from "./optional-
 import { transformImportExpression } from "./modules/import";
 import { transformLanguageExtensionCallExpression } from "./language-extensions/call-extension";
 import { getCustomNameFromSymbol } from "./identifier";
-import {embedInlineResult, InlineContextExtend, prepareInlineBody} from "../utils/inline";
+import { embedInlineResult, InlineContextExtend, prepareInlineBody } from "../utils/inline";
 
 export function validateArguments(
     context: TransformationContext,
@@ -300,7 +300,7 @@ export function getCalledExpression(node: ts.CallExpression): ts.Expression {
 }
 
 function getCallContext(node: ts.CallExpression): {
-    kind: 'return' | 'variable-declaration' | 'destructuring' | 'expression';
+    kind: "return" | "variable-declaration" | "destructuring" | "expression";
     variableName?: string;
     destructuredNames?: string[];
 } {
@@ -308,44 +308,37 @@ function getCallContext(node: ts.CallExpression): {
 
     // Case 1: return method()
     if (ts.isReturnStatement(parent) && parent.expression === node) {
-        return { kind: 'return' };
+        return { kind: "return" };
     }
 
     // Case 2: const [a, b] = method() - destructuring
-    if (ts.isVariableDeclaration(parent) &&
-      parent.initializer === node &&
-      ts.isArrayBindingPattern(parent.name)) {
-        const names = parent.name.elements.map(elem => {
-            // OmittedExpression не имеет name (например: const [a, , c] = ...)
-            if (ts.isOmittedExpression(elem)) {
+    if (ts.isVariableDeclaration(parent) && parent.initializer === node && ts.isArrayBindingPattern(parent.name)) {
+        const names = parent.name.elements
+            .map(elem => {
+                // OmittedExpression не имеет name (например: const [a, , c] = ...)
+                if (ts.isOmittedExpression(elem)) {
+                    return undefined;
+                }
+                // BindingElement имеет name
+                if (ts.isIdentifier(elem.name)) {
+                    return elem.name.text;
+                }
                 return undefined;
-            }
-            // BindingElement имеет name
-            if (ts.isIdentifier(elem.name)) {
-                return elem.name.text;
-            }
-            return undefined;
-        }).filter((name): name is string => name !== undefined);
-        return { kind: 'destructuring', destructuredNames: names };
+            })
+            .filter((name): name is string => name !== undefined);
+        return { kind: "destructuring", destructuredNames: names };
     }
 
-
     // Case 3: const res = method() - variable declaration
-    if (ts.isVariableDeclaration(parent) &&
-      parent.initializer === node &&
-      ts.isIdentifier(parent.name)) {
-        return { kind: 'variable-declaration', variableName: parent.name.text };
+    if (ts.isVariableDeclaration(parent) && parent.initializer === node && ts.isIdentifier(parent.name)) {
+        return { kind: "variable-declaration", variableName: parent.name.text };
     }
 
     // Case 4: Other contexts (expressions, arguments, etc.)
-    return { kind: 'expression' };
+    return { kind: "expression" };
 }
 
-function tryTransformInlineCall(
-  context: TransformationContext,
-  node: ts.CallExpression
-): lua.Expression | undefined {
-
+function tryTransformInlineCall(context: TransformationContext, node: ts.CallExpression): lua.Expression | undefined {
     const calledExpression = getCalledExpression(node);
 
     // Get the symbol of the called expression
@@ -371,25 +364,24 @@ function tryTransformInlineCall(
 
     const callCtx = getCallContext(node);
 
-    const isNested = (context as any as InlineContextExtend).__inlineDepth > 0
-    const isResultContext = !isNested && callCtx.kind === 'return'
+    const isNested = (context as any as InlineContextExtend).__inlineDepth > 0;
+    const isResultContext = !isNested && callCtx.kind === "return";
 
     // console.log(`Inline function ${symbol.name} called, Result = {hasMultiReturn=${result.hasMultiReturn},returnExpressions=${result.returnExpressions.length},paramAssignments=${result.paramAssignments.length},hasMultiReturn=${result.hasMultiReturn},target=${callCtx.kind},isReturn=${callCtx.kind==='return'}}`)
-    let target: { kind: 'variables'; vars: lua.Identifier[] } | undefined;
-    if (callCtx.kind === 'variable-declaration') {
-        target = { kind: 'variables', vars: [lua.createIdentifier(callCtx.variableName!)] };
-    } else if (callCtx.kind === 'destructuring') {
-        target = { kind: 'variables', vars: callCtx.destructuredNames!.map(n => lua.createIdentifier(n)) };
+    let target: { kind: "variables"; vars: lua.Identifier[] } | undefined;
+    if (callCtx.kind === "variable-declaration") {
+        target = { kind: "variables", vars: [lua.createIdentifier(callCtx.variableName!)] };
+    } else if (callCtx.kind === "destructuring") {
+        target = { kind: "variables", vars: callCtx.destructuredNames!.map(n => lua.createIdentifier(n)) };
     }
 
     return embedInlineResult(
-      context,
-      symbol.name,
-      [...result.paramAssignments, ...result.bodyStatements],
-      result.returnExpressions,
-      result.hasMultiReturn,
-      target,
-      isResultContext
+        context,
+        symbol.name,
+        [...result.paramAssignments, ...result.bodyStatements],
+        result.returnExpressions,
+        result.hasMultiReturn,
+        target,
+        isResultContext
     );
 }
-
